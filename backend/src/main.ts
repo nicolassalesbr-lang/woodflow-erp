@@ -13,7 +13,7 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api');
 
-  const port = process.env.PORT || 3009;
+  const port = process.env.PORT || 3012;
   console.log(`Starting WoodFlow Backend Server on port ${port}...`);
   await app.listen(port);
 }
