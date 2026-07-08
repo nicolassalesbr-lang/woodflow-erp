@@ -1,0 +1,30 @@
+{
+  "name": "woodflow-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "canvas-confetti": "^1.6.0",
+    "framer-motion": "^10.12.16",
+    "lucide-react": "^0.244.0",
+    "next": "^13.4.7",
+    "postcss": "^8.4.24",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "recharts": "^2.7.2",
+    "tailwindcss": "^3.3.2"
+  },
+  "devDependencies": {
+    "@types/canvas-confetti": "^1.6.0",
+    "@types/node": "^20.3.1",
+    "@types/react": "^18.2.13",
+    "@types/react-dom": "^18.2.6",
+    "autoprefixer": "^10.4.14",
+    "typescript": "^5.1.3"
+  }
+}

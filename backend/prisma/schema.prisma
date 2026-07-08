@@ -1,0 +1,192 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  ADMIN
+  DESIGNER
+  OPERATOR
+  SALES
+}
+
+enum LeadStatus {
+  NEW
+  CONTACT
+  VISIT
+  BUDGET
+  NEGOTIATION
+  WON
+  LOSE
+}
+
+enum ProjectStatus {
+  DRAFT
+  APPROVED
+  IN_PRODUCTION
+  INSTALLED
+}
+
+enum InventoryCategory {
+  MDF
+  HARDWARE
+  ACCESSORY
+}
+
+enum ProductionSector {
+  DESIGN
+  CUTTING
+  EDGING
+  ASSEMBLY
+  QUALITY
+}
+
+enum ProductionStatus {
+  WAITING
+  IN_PROGRESS
+  COMPLETED
+  BLOCKED
+}
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  cnpj      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users      User[]
+  leads      Lead[]
+  projects   Project[]
+  budgets    Budget[]
+  inventory  Inventory[]
+  production ProductionTask[]
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      UserRole @default(SALES)
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Lead {
+  id        String     @id @default(uuid())
+  name      String
+  phone     String?
+  email     String?
+  status    LeadStatus @default(NEW)
+  score     Float      @default(0.0)
+  source    String?
+  tenantId  String
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  timeline LeadTimeline[]
+  projects Project[]
+}
+
+model LeadTimeline {
+  id        String   @id @default(uuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type      String   // "NOTE", "WHATSAPP", "SYSTEM", "EMAIL"
+  content   String
+  author    String   @default("System")
+  createdAt DateTime @default(now())
+}
+
+model Project {
+  id              String        @id @default(uuid())
+  name            String
+  status          ProjectStatus @default(DRAFT)
+  description     String?
+  originalFileUrl String?
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  leadId          String?
+  lead            Lead?         @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  items      ProjectItem[]
+  budgets    Budget[]
+  production ProductionTask[]
+}
+
+model ProjectItem {
+  id           String   @id @default(uuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  environment  String   // e.g., "Cozinha", "Suíte"
+  itemType     String   // e.g., "Porta", "Prateleira", "Ferragem"
+  description  String
+  width        Float    // em mm
+  height       Float    // em mm
+  depth        Float    // em mm
+  thickness    Float    // em mm
+  quantity     Int
+  materialType String   // e.g., "MDF Branco Tx 18mm", "Dobradiça com amortecedor"
+  createdAt    DateTime @default(now())
+}
+
+model Budget {
+  id               String   @id @default(uuid())
+  projectId        String
+  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tenantId         String
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  totalMdfSheets   Int      @default(0)
+  totalHardwareCost Float    @default(0.0)
+  totalLaborCost   Float    @default(0.0)
+  wastePercent     Float    @default(10.0)
+  markup           Float    @default(1.5)
+  margin           Float    @default(30.0)
+  commission       Float    @default(5.0)
+  taxPercent       Float    @default(6.0)
+  finalPrice       Float    @default(0.0)
+  version          Int      @default(1)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Inventory {
+  id           String            @id @default(uuid())
+  tenantId     String
+  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String
+  category     InventoryCategory
+  sku          String
+  quantity     Float             @default(0.0)
+  minThreshold Float             @default(10.0)
+  unit         String            @default("un") // "un", "chapa", "m", "kg"
+  qrCode       String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+}
+
+model ProductionTask {
+  id          String           @id @default(uuid())
+  projectId   String
+  project     Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tenantId    String
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sector      ProductionSector
+  status      ProductionStatus @default(WAITING)
+  operatorId  String?
+  qrCode      String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
