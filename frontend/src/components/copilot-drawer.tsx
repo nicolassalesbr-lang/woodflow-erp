@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Bot, X, Send, Sparkles, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { getApiUrl } from '../utils/api';
 
 interface Message {
   sender: 'user' | 'assistant';
@@ -39,7 +40,7 @@ export default function CopilotDrawer({ isOpen, onClose }: CopilotDrawerProps) {
     setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3009/api/copilot/chat', {
+      const response = await fetch(`${getApiUrl()}/api/copilot/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

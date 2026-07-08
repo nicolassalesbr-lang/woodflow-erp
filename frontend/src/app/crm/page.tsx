@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
+import { getApiUrl } from '../../utils/api';
 
 interface Lead {
   id: string;
@@ -103,7 +104,7 @@ export default function CRM() {
 
   const moveLead = async (leadId: string, newStatus: string) => {
     try {
-      const res = await fetch(`http://localhost:3009/api/crm/leads/${leadId}`, {
+      const res = await fetch(`${getApiUrl()}/api/crm/leads/${leadId}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -133,7 +134,7 @@ export default function CRM() {
     if (!newLeadForm.name) return;
 
     try {
-      const res = await fetch('http://localhost:3009/api/crm/leads', {
+      const res = await fetch(`${getApiUrl()}/api/crm/leads`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -163,7 +164,7 @@ export default function CRM() {
     if (!selectedLead || !newNote.trim()) return;
 
     try {
-      const res = await fetch(`http://localhost:3009/api/crm/leads/${selectedLead.id}/timeline`, {
+      const res = await fetch(`${getApiUrl()}/api/crm/leads/${selectedLead.id}/timeline`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -196,7 +197,7 @@ export default function CRM() {
     setAiLoading(true);
     setAiSummary(null);
     try {
-      const res = await fetch(`http://localhost:3009/api/crm/leads/${leadId}/ai-summary`, {
+      const res = await fetch(`${getApiUrl()}/api/crm/leads/${leadId}/ai-summary`, {
         headers: { 'Authorization': 'Bearer mock-jwt-token-2026' }
       });
       const data = await res.json();

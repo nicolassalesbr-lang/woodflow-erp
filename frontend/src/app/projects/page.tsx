@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
+import { getApiUrl } from '../../utils/api';
 
 interface Project {
   id: string;
@@ -31,7 +32,7 @@ export default function Projects() {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('http://localhost:3009/api/projects', {
+      const res = await fetch(`${getApiUrl()}/api/projects`, {
         headers: { 'Authorization': 'Bearer mock-jwt-token-2026' }
       });
       const data = await res.json();
@@ -64,7 +65,7 @@ export default function Projects() {
     if (!newProjName) return;
 
     try {
-      const res = await fetch('http://localhost:3009/api/projects', {
+      const res = await fetch(`${getApiUrl()}/api/projects`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -99,7 +100,7 @@ export default function Projects() {
       const reader = new FileReader();
       reader.onload = async () => {
         const base64 = (reader.result as string).split(',')[1];
-        const res = await fetch(`http://localhost:3009/api/projects/${projectId}/parse`, {
+        const res = await fetch(`${getApiUrl()}/api/projects/${projectId}/parse`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -113,7 +114,7 @@ export default function Projects() {
         });
         if (res.ok) {
           fetchProjects();
-          const list = await fetch(`http://localhost:3009/api/projects`, {
+          const list = await fetch(`${getApiUrl()}/api/projects`, {
             headers: { 'Authorization': 'Bearer mock-jwt-token-2026' }
           }).then(r => r.json());
           const updatedProj = Array.isArray(list) ? list.find((p: any) => p.id === projectId) : null;
@@ -133,7 +134,7 @@ export default function Projects() {
   const simulateAiParsing = async (projectId: string) => {
     setUploading(true);
     try {
-      const res = await fetch(`http://localhost:3009/api/projects/${projectId}/parse`, {
+      const res = await fetch(`${getApiUrl()}/api/projects/${projectId}/parse`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -143,7 +144,7 @@ export default function Projects() {
       });
       if (res.ok) {
         fetchProjects();
-        const list = await fetch(`http://localhost:3009/api/projects`, {
+        const list = await fetch(`${getApiUrl()}/api/projects`, {
           headers: { 'Authorization': 'Bearer mock-jwt-token-2026' }
         }).then(r => r.json());
         const updatedProj = Array.isArray(list) ? list.find((p: any) => p.id === projectId) : null;

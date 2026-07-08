@@ -11,6 +11,7 @@ import {
   AlertOctagon
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { getApiUrl } from '../../utils/api';
 
 interface ProductionTask {
   id: string;
@@ -32,7 +33,7 @@ export default function ProductionKanban() {
 
   const fetchTasks = async () => {
     try {
-      const res = await fetch('http://localhost:3009/api/production', {
+      const res = await fetch(`${getApiUrl()}/api/production`, {
         headers: { 'Authorization': 'Bearer mock-jwt-token-2026' }
       });
       const data = await res.json();
@@ -96,7 +97,7 @@ export default function ProductionKanban() {
 
   const updateStatus = async (id: string, newStatus: string) => {
     try {
-      const res = await fetch(`http://localhost:3009/api/production/${id}`, {
+      const res = await fetch(`${getApiUrl()}/api/production/${id}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

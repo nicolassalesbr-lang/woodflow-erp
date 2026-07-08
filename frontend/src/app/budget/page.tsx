@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import confetti from 'canvas-confetti';
+import { getApiUrl } from '../../utils/api';
 
 interface Budget {
   id: string;
@@ -43,7 +44,7 @@ export default function BudgetScreen() {
   const calculateBudget = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:3009/api/budgets/calculate/proj-1', {
+      const res = await fetch(`${getApiUrl()}/api/budgets/calculate/proj-1`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -87,7 +88,7 @@ export default function BudgetScreen() {
   const sendToProduction = async () => {
     if (!budget) return;
     try {
-      await fetch(`http://localhost:3009/api/production/start/proj-1`, {
+      await fetch(`${getApiUrl()}/api/production/start/proj-1`, {
         method: 'POST',
         headers: {
           'Authorization': 'Bearer mock-jwt-token-2026'
