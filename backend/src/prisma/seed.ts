@@ -72,45 +72,7 @@ async function main() {
       },
     });
 
-    if (l.status === 'BUDGET' || l.status === 'NEGOTIATION') {
-      // Create a project for this lead
-      const project = await prisma.project.create({
-        data: {
-          name: `Projeto Completo Mansão - ${l.name.split(' ')[0]}`,
-          status: 'DRAFT',
-          description: 'Móveis sob medida de cozinha gourmet e home theater principal.',
-          tenantId: tenant.id,
-          leadId: lead.id,
-        },
-      });
-
-      // Parse items
-      await prisma.projectItem.createMany({
-        data: [
-          { projectId: project.id, environment: 'Cozinha', itemType: 'Caixa', description: 'Gabinete inferior', width: 2400, height: 750, depth: 600, thickness: 18, quantity: 1, materialType: 'MDF Branco TX 18mm' },
-          { projectId: project.id, environment: 'Cozinha', itemType: 'Porta', description: 'Porta basculante', width: 800, height: 400, depth: 20, thickness: 18, quantity: 3, materialType: 'MDF Louro Freijó 18mm' },
-          { projectId: project.id, environment: 'Cozinha', itemType: 'Ferragem', description: 'Dobradiça amortecedor', width: 35, height: 35, depth: 50, thickness: 0, quantity: 6, materialType: 'Dobradiça amortecedor 35mm' },
-        ],
-      });
-
-      // Calculate budget
-      await prisma.budget.create({
-        data: {
-          projectId: project.id,
-          tenantId: tenant.id,
-          totalMdfSheets: 6,
-          totalHardwareCost: 90.0,
-          totalLaborCost: 135.0,
-          wastePercent: 10.0,
-          markup: 1.6,
-          margin: 32.0,
-          commission: 5.0,
-          taxPercent: 6.0,
-          finalPrice: 5120.0,
-          version: 1,
-        },
-      });
-    }
+    // Leads are created, but no mock projects/items/budgets are attached
   }
 
   // 5. Create Default Inventory

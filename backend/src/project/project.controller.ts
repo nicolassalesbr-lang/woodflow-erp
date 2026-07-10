@@ -372,13 +372,9 @@ NÃO inclua markdown, backticks ou texto explicativo — retorne SOMENTE o JSON 
       }
     }
 
-    // FALLBACK: If no real items were parsed, use mock data
+    // FALLBACK: If no real items were parsed, keep it empty
     if (parsedItems.length === 0) {
-      console.warn('[AI Reader] All parsing tiers failed. Using mock fallback data.');
-      parsedItems = [
-        { environment: 'Cozinha', itemType: 'Caixa', description: 'Gabinete inferior pia', width: 1200, height: 800, depth: 600, thickness: 18, quantity: 1, materialType: 'MDF Branco TX 18mm' },
-        { environment: 'Cozinha', itemType: 'Porta', description: 'Porta basculante', width: 600, height: 400, depth: 20, thickness: 18, quantity: 2, materialType: 'Vidro Reflecta Bronze' },
-      ];
+      console.warn('[AI Reader] All parsing tiers failed or returned no items. No mock fallback data will be inserted.');
     }
 
     // Save items to database

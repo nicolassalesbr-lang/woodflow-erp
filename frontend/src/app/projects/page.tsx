@@ -119,80 +119,10 @@ export default function Projects() {
         const updated = list.find((p) => p.id === current?.id) || list[0] || null;
         return updated;
       });
-    } catch {
-      const mock = [
-        {
-          id: "proj-1",
-          name: "Apartamento Jardins",
-          description: "Cozinha integrada, home office e closet com acabamento amadeirado claro.",
-          status: "BUDGET",
-          originalFileUrl: "planta-apartamento-jardins.pdf",
-          items: [
-            {
-              id: "1",
-              environment: "Cozinha",
-              itemType: "Caixa",
-              description: "Gabinete sob pia com portas lisas",
-              width: 1200,
-              height: 820,
-              depth: 600,
-              thickness: 18,
-              quantity: 1,
-              materialType: "MDF Freijo claro 18mm"
-            },
-            {
-              id: "2",
-              environment: "Cozinha",
-              itemType: "Aereo",
-              description: "Armario superior com portas de abrir",
-              width: 1200,
-              height: 600,
-              depth: 350,
-              thickness: 18,
-              quantity: 1,
-              materialType: "MDF Off White 18mm"
-            },
-            {
-              id: "3",
-              environment: "Cozinha",
-              itemType: "Porta",
-              description: "Porta amadeirada basculante",
-              width: 600,
-              height: 600,
-              depth: 18,
-              thickness: 18,
-              quantity: 2,
-              materialType: "MDF Freijo claro 18mm"
-            },
-            {
-              id: "4",
-              environment: "Cozinha",
-              itemType: "Prateleira",
-              description: "Divisoria interna gabinete",
-              width: 1164,
-              height: 18,
-              depth: 550,
-              thickness: 18,
-              quantity: 2,
-              materialType: "MDF Off White 18mm"
-            },
-            {
-              id: "5",
-              environment: "Cozinha",
-              itemType: "Ferragem",
-              description: "Dobradica amortecedor clip",
-              width: 0,
-              height: 0,
-              depth: 0,
-              thickness: 0,
-              quantity: 6,
-              materialType: "Dobradica metalica 35mm"
-            }
-          ]
-        }
-      ];
-      setProjects(mock);
-      setSelectedProj(mock[0]);
+    } catch (err) {
+      console.error("Error fetching projects:", err);
+      setProjects([]);
+      setSelectedProj(null);
     }
   };
 
@@ -252,19 +182,9 @@ export default function Projects() {
         setShowAddForm(false);
         fetchProjects();
       }
-    } catch {
-      const project = {
-        id: `mock-${Date.now()}`,
-        name: newProjName,
-        description: newProjDesc || "Projeto sob medida em fase de briefing.",
-        status: "DRAFT",
-        items: []
-      };
-      setProjects((current: any) => [project, ...current]);
-      setSelectedProj(project);
-      setNewProjName("");
-      setNewProjDesc("");
-      setShowAddForm(false);
+    } catch (err) {
+      console.error("Error creating project:", err);
+      alert("Erro ao conectar com o servidor para criar o projeto.");
     }
   };
 
@@ -290,17 +210,13 @@ export default function Projects() {
         });
         if (res.ok) {
           fetchProjects();
+        } else {
+          const errMsg = await res.text();
+          throw new Error(errMsg || "Erro interno do servidor ao processar o arquivo.");
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error(err);
-        setProjects((current: any) =>
-          current.map((project: any) =>
-            project.id === projectId ? { ...project, originalFileUrl: file.name } : project
-          )
-        );
-        setSelectedProj((current: any) =>
-          current ? { ...current, originalFileUrl: file.name } : current
-        );
+        alert("Falha no upload/processamento: " + (err.message || err));
       } finally {
         setUploading(false);
       }
