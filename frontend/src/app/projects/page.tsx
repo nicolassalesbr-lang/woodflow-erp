@@ -272,9 +272,9 @@ export default function Projects() {
     const file = event.target.files?.[0];
     if (!file) return;
     setUploading(true);
-    try {
-      const reader = new FileReader();
-      reader.onload = async () => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
         const base64 = (reader.result as string).split(",")[1];
         const res = await fetch(`${getApiUrl()}/api/projects/${projectId}/parse`, {
           method: "POST",
@@ -291,20 +291,21 @@ export default function Projects() {
         if (res.ok) {
           fetchProjects();
         }
-      };
-      reader.readAsDataURL(file);
-    } catch {
-      setProjects((current: any) =>
-        current.map((project: any) =>
-          project.id === projectId ? { ...project, originalFileUrl: file.name } : project
-        )
-      );
-      setSelectedProj((current: any) =>
-        current ? { ...current, originalFileUrl: file.name } : current
-      );
-    } finally {
-      setUploading(false);
-    }
+      } catch (err) {
+        console.error(err);
+        setProjects((current: any) =>
+          current.map((project: any) =>
+            project.id === projectId ? { ...project, originalFileUrl: file.name } : project
+          )
+        );
+        setSelectedProj((current: any) =>
+          current ? { ...current, originalFileUrl: file.name } : current
+        );
+      } finally {
+        setUploading(false);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const calculateBudget = async () => {

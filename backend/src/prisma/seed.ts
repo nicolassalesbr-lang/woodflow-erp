@@ -7,8 +7,11 @@ async function main() {
   console.log('Seeding WoodFlow ERP database...');
 
   // 1. Create Tenant
-  const tenant = await prisma.tenant.create({
-    data: {
+  const tenant = await prisma.tenant.upsert({
+    where: { id: 'kaza-tenant-id' },
+    update: {},
+    create: {
+      id: 'kaza-tenant-id',
       name: 'Kaza Home Design',
       cnpj: '12.345.678/0001-99',
     },
