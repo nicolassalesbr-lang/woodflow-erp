@@ -321,10 +321,15 @@ NÃO inclua markdown, backticks ou texto explicativo — retorne SOMENTE o JSON 
         // STEP 1: Extract text from PDF using pdf-parse (for text-based PDFs)
         if (isPdf) {
           try {
-            const pdf = require('pdf-parse');
-            const pdfData = await pdf(buffer);
-            extractedText = pdfData.text || '';
-            console.log(`[AI Reader] PDF text extraction: ${extractedText.length} chars.`);
+            const pdfModule = require('pdf-parse');
+            const pdfParser = typeof pdfModule === 'function' ? pdfModule : (pdfModule.default || pdfModule);
+            if (typeof pdfParser === 'function') {
+              const pdfData = await pdfParser(buffer);
+              extractedText = pdfData.text || '';
+              console.log(`[AI Reader] PDF text extraction: ${extractedText.length} chars.`);
+            } else {
+              console.warn('[AI Reader] pdf-parse module has unexpected export shape:', typeof pdfParser);
+            }
           } catch (pdfErr) {
             console.warn('[AI Reader] pdf-parse failed:', pdfErr);
           }
