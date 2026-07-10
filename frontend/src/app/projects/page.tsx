@@ -96,13 +96,28 @@ export default function Projects() {
 
   // Nesting visualizer sheet selector
   const [selectedSheetIndex, setSelectedSheetIndex] = useState<number>(0);
+  const [selectedMaterial, setSelectedMaterial] = useState<string>("Todos");
+
+  // 3D visualizer filters & styles
+  const [selected3DEnv, setSelected3DEnv] = useState<string>("Todas");
+  const [selected3DItemId, setSelected3DItemId] = useState<string>("Todos");
+  const [viewStyle, setViewStyle] = useState<string>("textured");
+  const [doorOpenAngle, setDoorOpenAngle] = useState<number>(0);
+
   const canvasNestingRef = useRef<HTMLCanvasElement>(null);
 
   const selectedItems = selectedProj?.items || [];
   
   const environments = useMemo(() => {
     const names = selectedItems.map((item: any) => item.environment);
-    return Array.from(new Set(names));
+    return Array.from(new Set(names)) as string[];
+  }, [selectedItems]);
+
+  const projectMaterials = useMemo(() => {
+    const mats = selectedItems
+      .filter((item: any) => item.width > 0 && item.height > 0 && !item.itemType.toLowerCase().includes("ferragem"))
+      .map((item: any) => item.materialType || "MDF 18mm");
+    return ["Todos", ...Array.from(new Set(mats))] as string[];
   }, [selectedItems]);
 
   const fetchProjects = async () => {
@@ -258,10 +273,21 @@ export default function Projects() {
   const faces3D: Face3D[] = useMemo(() => {
     if (!selectedItems.length) return [];
     
+    // Filter items based on selected environment and selected item ID
+    let itemsToRender = selectedItems;
+    if (selected3DEnv !== "Todas") {
+      itemsToRender = itemsToRender.filter((i: any) => (i.environment || "Geral") === selected3DEnv);
+    }
+    if (selected3DItemId !== "Todos") {
+      itemsToRender = itemsToRender.filter((i: any) => i.id === selected3DItemId);
+    }
+
+    if (!itemsToRender.length) return [];
+
     const list: Face3D[] = [];
     const envGroups: Record<string, any[]> = {};
     
-    selectedItems.forEach((item: any) => {
+    itemsToRender.forEach((item: any) => {
       const env = item.environment || "Geral";
       if (!envGroups[env]) envGroups[env] = [];
       envGroups[env].push(item);
@@ -271,8 +297,8 @@ export default function Projects() {
 
     Object.entries(envGroups).forEach(([env, envItems]) => {
       // Find cabinets
-      const boxes = envItems.filter((i) => i.itemType.toLowerCase().includes("caixa") || i.itemType.toLowerCase().includes("roupeiro"));
-      const details = envItems.filter((i) => !i.itemType.toLowerCase().includes("caixa") && !i.itemType.toLowerCase().includes("roupeiro") && !i.itemType.toLowerCase().includes("ferragem"));
+      const boxes = envItems.filter((i) => i.itemType.toLowerCase().includes("caixa") || i.itemType.toLowerCase().includes("roupeiro") || i.itemType.toLowerCase().includes("aéreo") || i.itemType.toLowerCase().includes("armário"));
+      const details = envItems.filter((i) => !i.itemType.toLowerCase().includes("caixa") && !i.itemType.toLowerCase().includes("roupeiro") && !i.itemType.toLowerCase().includes("aéreo") && !i.itemType.toLowerCase().includes("armário") && !i.itemType.toLowerCase().includes("ferragem"));
       
       let cabinetX = envOffset;
 
@@ -285,12 +311,19 @@ export default function Projects() {
         const cy = h / 2;
         const cz = d / 2;
 
-        // Base box color (Warm wood tone)
-        addBoxFaces(list, cx, cy, cz, w, h, d, "#4b3525", "Caixa", cabinet);
+        // Base box color (Warm wood tone or style)
+        let boxColor = "#4b3525"; // standard wood
+        if (viewStyle === "solid") {
+          boxColor = "#0d9488"; // sleek teal
+        } else if (viewStyle === "wireframe") {
+          boxColor = "rgba(13, 148, 136, 0.18)";
+        }
+        
+        addBoxFaces(list, cx, cy, cz, w, h, d, boxColor, "Caixa", cabinet);
 
         // Shelves and doors
         const cabinetDoors = details.filter((i) => i.itemType.toLowerCase().includes("porta") || i.itemType.toLowerCase().includes("frente"));
-        const cabinetShelves = details.filter((i) => i.itemType.toLowerCase().includes("prateleira") || i.itemType.toLowerCase().includes("gaveta"));
+        const cabinetShelves = details.filter((i) => i.itemType.toLowerCase().includes("prateleira") || i.itemType.toLowerCase().includes("gaveta") || i.itemType.toLowerCase().includes("tampo"));
 
         cabinetShelves.forEach((shelf, sIdx) => {
           const sw = shelf.width || (w - 36);
@@ -298,7 +331,15 @@ export default function Projects() {
           const sd = shelf.depth || (d - 40);
           
           const sy = (h / (cabinetShelves.length + 1)) * (sIdx + 1);
-          addBoxFaces(list, cx, sy, cz - 10, sw, sh, sd, "#785840", "Prateleira", shelf);
+          
+          let shelfColor = "#785840";
+          if (viewStyle === "solid") {
+            shelfColor = "#0f766e";
+          } else if (viewStyle === "wireframe") {
+            shelfColor = "rgba(15, 118, 110, 0.15)";
+          }
+
+          addBoxFaces(list, cx, sy, cz - 10, sw, sh, sd, shelfColor, "Prateleira", shelf);
         });
 
         cabinetDoors.forEach((door, dIdx) => {
@@ -310,8 +351,25 @@ export default function Projects() {
           const doorY = dh / 2;
           const doorZ = d + dd / 2;
 
-          // Door colors (Gold beige styling)
-          addBoxFaces(list, doorX, doorY, doorZ, dw - 4, dh - 4, dd, "#d4af37", "Porta", door);
+          let doorColor = "#d4af37"; // gold
+          if (viewStyle === "solid") {
+            doorColor = "#f59e0b"; // sleek amber
+          } else if (viewStyle === "wireframe") {
+            doorColor = "rgba(245, 158, 11, 0.25)";
+          }
+
+          // Apply door rotation (opening doors)
+          const angle = doorOpenAngle * (Math.PI / 2); // 0 to 90 degrees
+          if (angle > 0) {
+            // Hinge is on the left edge for left door, right edge for right door
+            const isLeftDoor = dIdx === 0;
+            const hingeX = isLeftDoor ? (doorX - dw / 2) : (doorX + dw / 2);
+            const hingeZ = d; // front cabinet surface
+            
+            addBoxFacesWithRotation(list, doorX, doorY, doorZ, dw - 4, dh - 4, dd, doorColor, "Porta", door, hingeX, hingeZ, isLeftDoor ? -angle : angle);
+          } else {
+            addBoxFaces(list, doorX, doorY, doorZ, dw - 4, dh - 4, dd, doorColor, "Porta", door);
+          }
         });
 
         cabinetX += w + 300; // spacer
@@ -326,7 +384,12 @@ export default function Projects() {
           const cx = envOffset + idx * 600 + w / 2;
           const cy = h / 2;
           const cz = d / 2;
-          addBoxFaces(list, cx, cy, cz, w, h, d, "#8c6c50", item.itemType, item);
+          
+          let col = "#8c6c50";
+          if (viewStyle === "solid") col = "#6366f1";
+          else if (viewStyle === "wireframe") col = "rgba(99, 102, 241, 0.2)";
+          
+          addBoxFaces(list, cx, cy, cz, w, h, d, col, item.itemType, item);
         });
       }
 
@@ -334,7 +397,7 @@ export default function Projects() {
     });
 
     return list;
-  }, [selectedItems]);
+  }, [selectedItems, selected3DEnv, selected3DItemId, viewStyle, doorOpenAngle]);
 
   function addBoxFaces(
     list: Face3D[],
@@ -378,6 +441,81 @@ export default function Projects() {
         color,
         type,
         normal: fd.normal,
+        center: { x: cx, y: cy, z: cz },
+        offset: fd.offset,
+        item
+      });
+    });
+  }
+
+  function addBoxFacesWithRotation(
+    list: Face3D[],
+    cx: number,
+    cy: number,
+    cz: number,
+    w: number,
+    h: number,
+    d: number,
+    color: string,
+    type: string,
+    item: any,
+    hingeX: number,
+    hingeZ: number,
+    angle: number
+  ) {
+    const dx = w / 2;
+    const dy = h / 2;
+    const dz = d / 2;
+
+    const localV = [
+      { x: -dx, y: -dy, z: -dz },
+      { x: +dx, y: -dy, z: -dz },
+      { x: +dx, y: +dy, z: -dz },
+      { x: -dx, y: +dy, z: -dz },
+      { x: -dx, y: -dy, z: +dz },
+      { x: +dx, y: -dy, z: +dz },
+      { x: +dx, y: +dy, z: +dz },
+      { x: -dx, y: +dy, z: +dz }
+    ];
+
+    const v = localV.map((lv) => {
+      const gx = cx + lv.x;
+      const gz = cz + lv.z;
+      
+      const rx = gx - hingeX;
+      const rz = gz - hingeZ;
+      
+      const rotatedX = hingeX + rx * Math.cos(angle) - rz * Math.sin(angle);
+      const rotatedZ = hingeZ + rx * Math.sin(angle) + rz * Math.cos(angle);
+      
+      return {
+        x: rotatedX,
+        y: cy + lv.y,
+        z: rotatedZ
+      };
+    });
+
+    const faceDefs = [
+      { indices: [0, 1, 2, 3], normal: { x: 0, y: 0, z: -1 }, offset: { x: 0, y: 0, z: -1.2 } },
+      { indices: [1, 5, 6, 2], normal: { x: 1, y: 0, z: 0 }, offset: { x: 1.2, y: 0, z: 0 } },
+      { indices: [5, 4, 7, 6], normal: { x: 0, y: 0, z: 1 }, offset: { x: 0, y: 0, z: 1.5 } },
+      { indices: [4, 0, 3, 7], normal: { x: -1, y: 0, z: 0 }, offset: { x: -1.2, y: 0, z: 0 } },
+      { indices: [3, 2, 6, 7], normal: { x: 0, y: 1, z: 0 }, offset: { x: 0, y: 1.2, z: 0 } },
+      { indices: [4, 5, 1, 0], normal: { x: 0, y: -1, z: 0 }, offset: { x: 0, y: -1.2, z: 0 } }
+    ];
+
+    faceDefs.forEach((fd) => {
+      const rotatedNormal = {
+        x: fd.normal.x * Math.cos(angle) - fd.normal.z * Math.sin(angle),
+        y: fd.normal.y,
+        z: fd.normal.x * Math.sin(angle) + fd.normal.z * Math.cos(angle)
+      };
+
+      list.push({
+        vertices: fd.indices.map((idx) => ({ ...v[idx] })),
+        color,
+        type,
+        normal: rotatedNormal,
         center: { x: cx, y: cy, z: cz },
         offset: fd.offset,
         item
@@ -506,6 +644,48 @@ export default function Projects() {
         ctx.stroke();
       });
 
+      // Draw measurement lines (Cotes) if visualizing a single cabinet
+      if (selected3DItemId !== "Todos" && selectedItems.length) {
+        const item = selectedItems.find((i: any) => i.id === selected3DItemId);
+        if (item) {
+          const w = item.width || 800;
+          const h = item.height || 800;
+          const d = item.depth || 600;
+
+          // Project corner coordinates
+          const pBottomLeftFront = project3D({ x: 0, y: 0, z: d }, yaw, pitch, zoom, canvas.width, canvas.height);
+          const pBottomRightFront = project3D({ x: w, y: 0, z: d }, yaw, pitch, zoom, canvas.width, canvas.height);
+          const pTopLeftFront = project3D({ x: 0, y: h, z: d }, yaw, pitch, zoom, canvas.width, canvas.height);
+          const pBottomLeftBack = project3D({ x: 0, y: 0, z: 0 }, yaw, pitch, zoom, canvas.width, canvas.height);
+
+          ctx.strokeStyle = "#fb923c"; // premium orange
+          ctx.fillStyle = "#fb923c";
+          ctx.lineWidth = 1.2;
+          ctx.font = "bold 10px monospace";
+
+          // Width line and text
+          ctx.beginPath();
+          ctx.moveTo(pBottomLeftFront.x, pBottomLeftFront.y + 15);
+          ctx.lineTo(pBottomRightFront.x, pBottomRightFront.y + 15);
+          ctx.stroke();
+          ctx.fillText(`L: ${w}mm`, (pBottomLeftFront.x + pBottomRightFront.x) / 2 - 25, (pBottomLeftFront.y + pBottomRightFront.y) / 2 + 27);
+
+          // Height line and text
+          ctx.beginPath();
+          ctx.moveTo(pBottomLeftFront.x - 15, pBottomLeftFront.y);
+          ctx.lineTo(pTopLeftFront.x - 15, pTopLeftFront.y);
+          ctx.stroke();
+          ctx.fillText(`A: ${h}mm`, (pBottomLeftFront.x + pTopLeftFront.x) / 2 - 60, (pBottomLeftFront.y + pTopLeftFront.y) / 2);
+
+          // Depth line and text
+          ctx.beginPath();
+          ctx.moveTo(pBottomLeftBack.x - 12, pBottomLeftBack.y + 10);
+          ctx.lineTo(pBottomLeftFront.x - 12, pBottomLeftFront.y + 10);
+          ctx.stroke();
+          ctx.fillText(`P: ${d}mm`, (pBottomLeftBack.x + pBottomLeftFront.x) / 2 - 50, (pBottomLeftBack.y + pBottomLeftFront.y) / 2 + 20);
+        }
+      }
+
       // Update auto-rotation angle if enabled
       if (autoRotate && !isDraggingRef.current) {
         setYaw((y) => y + 0.003);
@@ -522,14 +702,29 @@ export default function Projects() {
     return () => {
       cancelAnimationFrame(animationId);
     };
-  }, [faces3D, yaw, pitch, zoom, exploded, autoRotate, hovered3DItem, selected3DItem, activeTab]);
+  }, [faces3D, yaw, pitch, zoom, exploded, autoRotate, hovered3DItem, selected3DItem, activeTab, selected3DItemId, selectedItems]);
 
   function project3D(v: Point3D, yaw: number, pitch: number, zoom: number, width: number, height: number) {
     // Center point in coordinates
-    const offset = { x: -800, y: -400, z: -300 };
-    const px = v.x + offset.x;
-    const py = v.y + offset.y;
-    const pz = v.z + offset.z;
+    let offsetX = -800;
+    let offsetY = -400;
+    let offsetZ = -300;
+
+    if (selected3DItemId !== "Todos" && selectedItems.length) {
+      const item = selectedItems.find((i: any) => i.id === selected3DItemId);
+      if (item) {
+        const w = item.width || 800;
+        const h = item.height || 800;
+        const d = item.depth || 600;
+        offsetX = -w / 2;
+        offsetY = -h / 2;
+        offsetZ = -d / 2;
+      }
+    }
+
+    const px = v.x + offsetX;
+    const py = v.y + offsetY;
+    const pz = v.z + offsetZ;
 
     // Rotate Y (Yaw)
     const x1 = px * Math.cos(yaw) - pz * Math.sin(yaw);
@@ -599,129 +794,144 @@ export default function Projects() {
         !item.description.toLowerCase().includes("ferragem")
     );
 
-    const rectsToPack: any[] = [];
-    panels.forEach((p: any) => {
-      for (let i = 0; i < p.quantity; i++) {
-        rectsToPack.push({
-          id: `${p.id}-${i}`,
-          w: Math.max(p.width, p.height),
-          h: Math.min(p.width, p.height),
-          parent: p
-        });
-      }
-    });
-
-    // Sort descending by area
-    rectsToPack.sort((a, b) => b.w * b.h - a.w * a.h);
+    // Apply material filter if selected
+    let materialsToProcess = Array.from(new Set(panels.map((p: any) => p.materialType || "MDF 18mm")));
+    if (selectedMaterial && selectedMaterial !== "Todos") {
+      materialsToProcess = [selectedMaterial];
+    }
 
     const sheets: Sheet[] = [];
     const sheetW = 2750;
     const sheetH = 1840;
     const sawKerf = 5;
 
-    rectsToPack.forEach((rect) => {
-      let placed = false;
+    materialsToProcess.forEach((material) => {
+      const materialPanels = panels.filter((p: any) => (p.materialType || "MDF 18mm") === material);
+      
+      const rectsToPack: any[] = [];
+      materialPanels.forEach((p: any) => {
+        for (let i = 0; i < p.quantity; i++) {
+          rectsToPack.push({
+            id: `${p.id}-${i}`,
+            w: Math.max(p.width, p.height),
+            h: Math.min(p.width, p.height),
+            parent: p
+          });
+        }
+      });
 
-      for (const sheet of sheets) {
-        for (let i = 0; i < sheet.freeSpaces.length; i++) {
-          const space = sheet.freeSpaces[i];
-          const fitsNormal = rect.w <= space.w && rect.h <= space.h;
-          const fitsRotated = rect.h <= space.w && rect.w <= space.h;
+      // Sort descending by area
+      rectsToPack.sort((a, b) => b.w * b.h - a.w * a.h);
 
-          if (fitsNormal || fitsRotated) {
-            const w = fitsNormal ? rect.w : rect.h;
-            const h = fitsNormal ? rect.h : rect.w;
+      const materialSheets: Sheet[] = [];
 
-            sheet.packed.push({
-              x: space.x,
-              y: space.y,
-              w,
-              h,
-              item: rect.parent
-            });
+      rectsToPack.forEach((rect) => {
+        let placed = false;
 
-            const remW = space.w - w;
-            const remH = space.h - h;
+        for (const sheet of materialSheets) {
+          for (let i = 0; i < sheet.freeSpaces.length; i++) {
+            const space = sheet.freeSpaces[i];
+            const fitsNormal = rect.w <= space.w && rect.h <= space.h;
+            const fitsRotated = rect.h <= space.w && rect.w <= space.h;
 
-            sheet.freeSpaces.splice(i, 1);
+            if (fitsNormal || fitsRotated) {
+              const w = fitsNormal ? rect.w : rect.h;
+              const h = fitsNormal ? rect.h : rect.w;
 
-            if (remW > remH) {
-              if (remW > sawKerf) {
-                sheet.freeSpaces.push({
-                  x: space.x + w + sawKerf,
-                  y: space.y,
-                  w: remW - sawKerf,
-                  h: space.h
-                });
+              sheet.packed.push({
+                x: space.x,
+                y: space.y,
+                w,
+                h,
+                item: rect.parent
+              });
+
+              const remW = space.w - w;
+              const remH = space.h - h;
+
+              sheet.freeSpaces.splice(i, 1);
+
+              if (remW > remH) {
+                if (remW > sawKerf) {
+                  sheet.freeSpaces.push({
+                    x: space.x + w + sawKerf,
+                    y: space.y,
+                    w: remW - sawKerf,
+                    h: space.h
+                  });
+                }
+                if (remH > sawKerf) {
+                  sheet.freeSpaces.push({
+                    x: space.x,
+                    y: space.y + h + sawKerf,
+                    w,
+                    h: remH - sawKerf
+                  });
+                }
+              } else {
+                if (remH > sawKerf) {
+                  sheet.freeSpaces.push({
+                    x: space.x,
+                    y: space.y + h + sawKerf,
+                    w: space.w,
+                    h: remH - sawKerf
+                  });
+                }
+                if (remW > sawKerf) {
+                  sheet.freeSpaces.push({
+                    x: space.x + w + sawKerf,
+                    y: space.y,
+                    w: remW - sawKerf,
+                    h
+                  });
+                }
               }
-              if (remH > sawKerf) {
-                sheet.freeSpaces.push({
-                  x: space.x,
-                  y: space.y + h + sawKerf,
-                  w,
-                  h: remH - sawKerf
-                });
-              }
-            } else {
-              if (remH > sawKerf) {
-                sheet.freeSpaces.push({
-                  x: space.x,
-                  y: space.y + h + sawKerf,
-                  w: space.w,
-                  h: remH - sawKerf
-                });
-              }
-              if (remW > sawKerf) {
-                sheet.freeSpaces.push({
-                  x: space.x + w + sawKerf,
-                  y: space.y,
-                  w: remW - sawKerf,
-                  h
-                });
-              }
+
+              placed = true;
+              break;
             }
-
-            placed = true;
-            break;
           }
-        }
-        if (placed) break;
-      }
-
-      if (!placed) {
-        const newSheet: Sheet = {
-          width: sheetW,
-          height: sheetH,
-          packed: [{ x: 0, y: 0, w: rect.w, h: rect.h, item: rect.parent }],
-          freeSpaces: []
-        };
-
-        const remW = sheetW - rect.w;
-        const remH = sheetH - rect.h;
-
-        if (remW > sawKerf) {
-          newSheet.freeSpaces.push({
-            x: rect.w + sawKerf,
-            y: 0,
-            w: remW - sawKerf,
-            h: sheetH
-          });
-        }
-        if (remH > sawKerf) {
-          newSheet.freeSpaces.push({
-            x: 0,
-            y: rect.h + sawKerf,
-            w: rect.w,
-            h: remH - sawKerf
-          });
+          if (placed) break;
         }
 
-        sheets.push(newSheet);
-      }
+        if (!placed) {
+          const newSheet: Sheet = {
+            width: sheetW,
+            height: sheetH,
+            packed: [{ x: 0, y: 0, w: rect.w, h: rect.h, item: rect.parent }],
+            freeSpaces: []
+          };
+
+          const remW = sheetW - rect.w;
+          const remH = sheetH - rect.h;
+
+          if (remW > sawKerf) {
+            newSheet.freeSpaces.push({
+              x: rect.w + sawKerf,
+              y: 0,
+              w: remW - sawKerf,
+              h: sheetH
+            });
+          }
+          if (remH > sawKerf) {
+            newSheet.freeSpaces.push({
+              x: 0,
+              y: rect.h + sawKerf,
+              w: rect.w,
+              h: remH - sawKerf
+            });
+          }
+
+          (newSheet as any).material = material;
+          materialSheets.push(newSheet);
+        }
+      });
+
+      sheets.push(...materialSheets);
     });
 
     return sheets;
-  }, [selectedItems]);
+  }, [selectedItems, selectedMaterial]);
 
   // Nesting Canvas renderer
   useEffect(() => {
@@ -810,6 +1020,14 @@ export default function Projects() {
     ctx.rotate(-Math.PI / 2);
     ctx.fillText("1840 mm", 0, 0);
     ctx.restore();
+
+    // Draw sheet material label at top right
+    if ((sheet as any).material) {
+      ctx.fillStyle = "#fb923c";
+      ctx.font = "bold 10px monospace";
+      ctx.textAlign = "right";
+      ctx.fillText((sheet as any).material, startX + boardW - 5, startY - 6);
+    }
   }, [nestingSheets, selectedSheetIndex, activeTab]);
 
   const nestingEfficiency: number = useMemo(() => {
@@ -1092,9 +1310,9 @@ export default function Projects() {
 
               {/* TAB 2: 3D MODEL */}
               {activeTab === "model3d" && (
-                <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_300px]">
+                <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_320px]">
                   {/* Visualizer Canvas */}
-                  <div className="relative rounded-2xl border border-[#e8d4b8]/10 bg-[#0b0907] p-1">
+                  <div className="relative rounded-2xl border border-[#e8d4b8]/10 bg-[#0b0907] p-1 flex flex-col justify-between">
                     {faces3D.length ? (
                       <>
                         <canvas
@@ -1112,19 +1330,19 @@ export default function Projects() {
                         <div className="absolute bottom-5 left-5 flex gap-2">
                           <button
                             onClick={() => { setYaw(-0.6); setPitch(-0.4); setZoom(0.12); }}
-                            className="rounded-lg bg-[#211811]/90 border border-[#e8d4b8]/20 px-3 py-1.5 text-xs text-[#ead5ba]"
+                            className="rounded-lg bg-[#211811]/90 border border-[#e8d4b8]/20 px-3 py-1.5 text-xs text-[#ead5ba] hover:bg-[#382b20]"
                           >
                             Reset
                           </button>
                           <button
                             onClick={() => setAutoRotate(!autoRotate)}
-                            className={`rounded-lg border px-3 py-1.5 text-xs ${
+                            className={`rounded-lg border px-3 py-1.5 text-xs flex items-center gap-1 ${
                               autoRotate
                                 ? "bg-[#ead5ba] border-transparent text-[#20170f]"
-                                : "bg-[#211811]/90 border-[#e8d4b8]/20 text-[#ead5ba]"
+                                : "bg-[#211811]/90 border-[#e8d4b8]/20 text-[#ead5ba] hover:bg-[#382b20]"
                             }`}
                           >
-                            <RotateCw className={`h-3 w-3 inline mr-1 ${autoRotate ? 'animate-spin' : ''}`} />
+                            <RotateCw className={`h-3 w-3 ${autoRotate ? 'animate-spin' : ''}`} />
                             Giro Auto
                           </button>
                         </div>
@@ -1141,15 +1359,127 @@ export default function Projects() {
                   </div>
 
                   {/* Sidebar controls for 3D View */}
-                  <aside className="rounded-xl border border-[#e8d4b8]/10 bg-[#211811]/50 p-5 space-y-6">
+                  <aside className="rounded-xl border border-[#e8d4b8]/10 bg-[#211811]/50 p-5 space-y-5">
                     <h3 className="font-semibold tracking-tight text-[#fff8f0]">
                       Controles de Visualização
                     </h3>
 
                     <div className="space-y-4">
+                      {/* Environment Filter */}
+                      <div>
+                        <label className="text-xs text-[#bba890] block mb-1.5">Ambiente</label>
+                        <select
+                          value={selected3DEnv}
+                          onChange={(e) => {
+                            setSelected3DEnv(e.target.value);
+                            setSelected3DItemId("Todos"); // Reset selected item when env changes
+                          }}
+                          className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-3 py-2 text-xs text-[#fff8f0] outline-none focus:border-[#fb923c]/50"
+                        >
+                          <option value="Todas">Todos os Ambientes</option>
+                          {environments.map((env) => (
+                            <option key={env} value={env}>{env}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Item Selector */}
+                      <div>
+                        <label className="text-xs text-[#bba890] block mb-1.5">Módulo / Peça</label>
+                        <select
+                          value={selected3DItemId}
+                          onChange={(e) => setSelected3DItemId(e.target.value)}
+                          className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-3 py-2 text-xs text-[#fff8f0] outline-none focus:border-[#fb923c]/50"
+                        >
+                          <option value="Todos">Todos os Módulos</option>
+                          {selectedItems
+                            .filter((item: any) => {
+                              const matchEnv = selected3DEnv === "Todas" || (item.environment || "Geral") === selected3DEnv;
+                              const hasSize = item.width > 0 && item.height > 0;
+                              const isNotHardware = !item.itemType.toLowerCase().includes("ferragem");
+                              return matchEnv && hasSize && isNotHardware;
+                            })
+                            .map((item: any) => (
+                              <option key={item.id} value={item.id}>
+                                {item.description} ({item.width}x{item.height}x{item.depth})
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+
+                      {/* Visual Style Selection */}
+                      <div>
+                        <label className="text-xs text-[#bba890] block mb-1.5">Estilo Visual</label>
+                        <div className="grid grid-cols-3 gap-1">
+                          {[
+                            { value: "textured", label: "Textura" },
+                            { value: "solid", label: "Sólido" },
+                            { value: "wireframe", label: "Técnico" }
+                          ].map((style) => (
+                            <button
+                              key={style.value}
+                              onClick={() => setViewStyle(style.value)}
+                              className={`rounded-lg px-2 py-1.5 text-[10px] font-bold border transition ${
+                                viewStyle === style.value
+                                  ? "bg-[#ead5ba] border-transparent text-[#20170f]"
+                                  : "bg-[#18120d]/80 border-[#e8d4b8]/10 text-[#bba890] hover:text-[#ead5ba]"
+                              }`}
+                            >
+                              {style.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Preset Angle Buttons */}
+                      <div>
+                        <label className="text-xs text-[#bba890] block mb-1.5">Ângulo da Câmera</label>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {[
+                            { label: "Isométrica", yaw: -0.6, pitch: -0.4 },
+                            { label: "Frontal (L)", yaw: 0, pitch: 0 },
+                            { label: "Superior (A)", yaw: 0, pitch: -Math.PI / 2 },
+                            { label: "Lateral (P)", yaw: Math.PI / 2, pitch: 0 }
+                          ].map((camera) => (
+                            <button
+                              key={camera.label}
+                              onClick={() => {
+                                setYaw(camera.yaw);
+                                setPitch(camera.pitch);
+                                setZoom(0.15); // Autofit zoom
+                                setAutoRotate(false); // Pause auto rotation
+                              }}
+                              className="rounded-lg bg-[#18120d]/80 border border-[#e8d4b8]/10 px-2 py-1 text-[10px] text-[#bba890] hover:text-[#ead5ba] hover:bg-[#382b20] font-bold"
+                            >
+                              {camera.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Doors & Drawers Open Angle Slider */}
+                      <div>
+                        <div className="flex justify-between text-xs font-semibold text-[#bba890] mb-1.5">
+                          <span>Abertura Portas/Frentes</span>
+                          <span>{Math.round(doorOpenAngle * 100)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value={doorOpenAngle}
+                          onChange={(e) => {
+                            setDoorOpenAngle(parseFloat(e.target.value));
+                            setAutoRotate(false); // Stop rotation to let them adjust opening
+                          }}
+                          className="w-full accent-[#fb923c]"
+                        />
+                      </div>
+
                       {/* Exploded View Slider */}
                       <div>
-                        <div className="flex justify-between text-xs font-semibold text-[#bba890] mb-2">
+                        <div className="flex justify-between text-xs font-semibold text-[#bba890] mb-1.5">
                           <span>Vista Explodida</span>
                           <span>{Math.round(exploded * 100)}%</span>
                         </div>
@@ -1160,7 +1490,7 @@ export default function Projects() {
                           step="0.01"
                           value={exploded}
                           onChange={(e) => setExploded(parseFloat(e.target.value))}
-                          className="w-full accent-[#d6ad79]"
+                          className="w-full accent-[#fb923c]"
                         />
                       </div>
 
@@ -1168,9 +1498,9 @@ export default function Projects() {
                       <div className="rounded-xl bg-[#fff7ed]/[0.03] p-4 text-xs leading-5 text-[#bba890] border border-[#e8d4b8]/10">
                         <p className="font-bold text-[#ead5ba] mb-1">Dicas de Uso:</p>
                         <ul className="list-disc pl-4 space-y-1">
-                          <li>Arraste o mouse para girar o móvel.</li>
-                          <li>Use o scroll para dar zoom.</li>
-                          <li>Peças são coloridas de acordo com suas características.</li>
+                          <li>Arraste para girar a visualização 3D.</li>
+                          <li>Role o scroll do mouse para ajustar o zoom.</li>
+                          <li>Clique em "Reset" para restaurar a câmera original.</li>
                         </ul>
                       </div>
                     </div>
@@ -1182,56 +1512,107 @@ export default function Projects() {
               {activeTab === "budgeting" && (
                 <div className="space-y-6">
                   {/* Calculations setup */}
-                  <section className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_360px]">
+                  <section className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_380px]">
                     {/* Left: Interactive nesting canvas */}
-                    <div className="rounded-2xl border border-[#e8d4b8]/10 bg-[#0b0907] p-5">
-                      <div className="mb-4 flex items-center justify-between">
+                    <div className="rounded-2xl border border-[#e8d4b8]/10 bg-[#0b0907] p-5 space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-[#e8d4b8]/10">
                         <div>
                           <h3 className="font-semibold text-[#fff8f0]">Plano de Corte (Nesting 2D)</h3>
-                          <p className="text-xs text-[#bba890] mt-1">Acomodação geométrica em chapas padrão 2.75m x 1.84m (5mm de perda por corte).</p>
+                          <p className="text-xs text-[#bba890] mt-0.5">Acomodação geométrica em chapas padrão 2.75m x 1.84m.</p>
                         </div>
+                        {/* Material Filter */}
                         <div className="flex items-center gap-2">
-                          <span className="rounded-full bg-[#d6ad79]/14 px-3 py-1 text-xs font-bold text-[#ead5ba]">
-                            Eficiência: {nestingEfficiency}%
-                          </span>
+                          <label className="text-xs text-[#bba890] font-bold">Material:</label>
+                          <select
+                            value={selectedMaterial}
+                            onChange={(e) => {
+                              setSelectedMaterial(e.target.value);
+                              setSelectedSheetIndex(0); // Reset index
+                            }}
+                            className="rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-2 py-1 text-xs text-[#fff8f0] outline-none"
+                          >
+                            {projectMaterials.map((mat) => (
+                              <option key={mat} value={mat}>{mat}</option>
+                            ))}
+                          </select>
                         </div>
                       </div>
 
                       {nestingSheets.length ? (
                         <div className="space-y-4">
-                          <canvas
-                            ref={canvasNestingRef}
-                            width={720}
-                            height={440}
-                            className="w-full h-[400px] bg-[#100b08] rounded-xl border border-[#e8d4b8]/5"
-                          />
+                          <div className="relative">
+                            <canvas
+                              ref={canvasNestingRef}
+                              width={720}
+                              height={400}
+                              className="w-full h-[380px] bg-[#100b08] rounded-xl border border-[#e8d4b8]/5"
+                            />
+                            <div className="absolute top-3 left-3 rounded-md bg-[#000000a0] border border-[#e8d4b8]/20 px-2 py-1 text-[10px] text-[#ead5ba]">
+                              Eficiência: <span className="font-bold text-[#fb923c]">{nestingEfficiency}%</span>
+                            </div>
+                          </div>
+
                           {/* Selector */}
                           <div className="flex items-center justify-between">
                             <span className="text-xs text-[#cdbca7]">
-                              Chapa {selectedSheetIndex + 1} de {nestingSheets.length}
+                              Chapa <span className="font-bold text-[#ead5ba]">{selectedSheetIndex + 1}</span> de <span className="font-bold text-[#ead5ba]">{nestingSheets.length}</span>
                             </span>
                             <div className="flex gap-2">
                               <button
                                 disabled={selectedSheetIndex === 0}
                                 onClick={() => setSelectedSheetIndex((i) => i - 1)}
-                                className="rounded-lg border border-[#e8d4b8]/12 bg-[#211811]/90 px-3 py-1.5 text-xs text-[#ead5ba] disabled:opacity-40"
+                                className="rounded-lg border border-[#e8d4b8]/12 bg-[#211811]/90 px-3 py-1.5 text-xs text-[#ead5ba] hover:bg-[#382b20] disabled:opacity-40"
                               >
                                 Anterior
                               </button>
                               <button
                                 disabled={selectedSheetIndex === nestingSheets.length - 1}
                                 onClick={() => setSelectedSheetIndex((i) => i + 1)}
-                                className="rounded-lg border border-[#e8d4b8]/12 bg-[#211811]/90 px-3 py-1.5 text-xs text-[#ead5ba] disabled:opacity-40"
+                                className="rounded-lg border border-[#e8d4b8]/12 bg-[#211811]/90 px-3 py-1.5 text-xs text-[#ead5ba] hover:bg-[#382b20] disabled:opacity-40"
                               >
                                 Próxima
                               </button>
+                            </div>
+                          </div>
+
+                          {/* Detail of items packed on the current sheet */}
+                          <div className="rounded-xl border border-[#e8d4b8]/10 bg-[#18120d]/50 p-4 space-y-3">
+                            <h4 className="text-xs font-bold text-[#ead5ba] tracking-wider uppercase">
+                              Peças Acomodadas nesta Chapa
+                            </h4>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left text-xs border-collapse">
+                                <thead>
+                                  <tr className="border-b border-[#e8d4b8]/10 text-[#bba890] font-bold">
+                                    <th className="py-2">Peça / Descrição</th>
+                                    <th className="py-2">Dimensões (mm)</th>
+                                    <th className="py-2 text-right">Espessura</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {nestingSheets[selectedSheetIndex]?.packed.map((part, pIdx) => (
+                                    <tr key={pIdx} className="border-b border-[#e8d4b8]/5 text-[#fff8f0]">
+                                      <td className="py-2 font-medium">
+                                        {part.item?.description || "Peça avulsa"} 
+                                        <span className="text-[10px] text-[#bba890] ml-2">({part.item?.environment})</span>
+                                      </td>
+                                      <td className="py-2 text-mono">
+                                        {Math.round(part.w)} x {Math.round(part.h)}
+                                      </td>
+                                      <td className="py-2 text-right text-mono">
+                                        {part.item?.thickness || 18} mm
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
                             </div>
                           </div>
                         </div>
                       ) : (
                         <div className="flex h-[320px] items-center justify-center text-center">
                           <div>
-                            <Package className="mx-auto h-8 w-8 text-[#d6ad79]" />
+                            <Package className="mx-auto h-8 w-8 text-[#d6ad79] opacity-65" />
                             <h4 className="mt-4 font-semibold text-[#fff8f0]">Plano de corte indisponível</h4>
                             <p className="mt-2 text-xs text-[#bba890]">Extraia peças do PDF primeiro para estimar chapa.</p>
                           </div>
@@ -1240,24 +1621,45 @@ export default function Projects() {
                     </div>
 
                     {/* Right: Calculations parameters */}
-                    <aside className="rounded-xl border border-[#e8d4b8]/10 bg-[#211811]/50 p-5 space-y-6">
+                    <aside className="rounded-xl border border-[#e8d4b8]/10 bg-[#211811]/50 p-5 space-y-5">
                       <div className="flex items-center gap-2">
-                        <DollarSign className="h-5 w-5 text-[#d6ad79]" />
+                        <DollarSign className="h-5 w-5 text-[#fb923c]" />
                         <h3 className="font-semibold tracking-tight text-[#fff8f0]">
-                          Parâmetros de Venda
+                          Orçamento & Margens
                         </h3>
                       </div>
 
                       {/* Display final price */}
-                      <div className="rounded-xl bg-[#d6ad79]/10 border border-[#d6ad79]/20 p-5 text-center">
-                        <div className="text-sm font-bold text-[#ead5ba] uppercase tracking-wider">Preço Final Estimado</div>
-                        <div className="text-3xl font-bold text-[#fff8f0] mt-2">
-                          {budget ? `R$ ${budget.finalPrice.toLocaleString('pt-BR')}` : 'R$ ---'}
+                      <div className="rounded-xl bg-[#d6ad79]/10 border border-[#d6ad79]/20 p-4 space-y-3">
+                        <div className="text-center">
+                          <div className="text-[10px] font-bold text-[#ead5ba] uppercase tracking-wider">Preço de Venda Sugerido</div>
+                          <div className="text-3xl font-bold text-[#fff8f0] mt-1.5">
+                            {budget ? `R$ ${budget.finalPrice.toLocaleString('pt-BR')}` : 'R$ ---'}
+                          </div>
                         </div>
+                        
                         {budget && (
-                          <div className="text-xs text-[#cdbca7] mt-2 space-y-1">
-                            <div>Chapas MDF: {budget.totalMdfSheets} un</div>
-                            <div>Custo ferragem: R$ {budget.totalHardwareCost.toFixed(2)}</div>
+                          <div className="pt-2 border-t border-[#e8d4b8]/10 space-y-1.5 text-xs text-[#cdbca7]">
+                            <div className="flex justify-between">
+                              <span>Mdf/Matérias:</span>
+                              <span className="text-[#fff8f0] font-mono">{budget.totalMdfSheets} chapas (est. R$ 260/un)</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Ferragens/Acessórios:</span>
+                              <span className="text-[#fff8f0] font-mono">R$ {budget.totalHardwareCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Mão de Obra / Fabr.:</span>
+                              <span className="text-[#fff8f0] font-mono">R$ {budget.totalLaborCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                            </div>
+                            <div className="flex justify-between border-t border-[#e8d4b8]/5 pt-1.5 text-[#fb923c] font-bold">
+                              <span>Comissão ({commission}%):</span>
+                              <span className="font-mono">R$ {(budget.finalPrice * (commission/100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                            </div>
+                            <div className="flex justify-between text-[#ead5ba]">
+                              <span>Impostos ({taxPercent}%):</span>
+                              <span className="font-mono">R$ {(budget.finalPrice * (taxPercent/100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1271,7 +1673,7 @@ export default function Projects() {
                               step="0.05"
                               value={markup}
                               onChange={(e) => setMarkup(parseFloat(e.target.value) || 1)}
-                              className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-3 py-2 text-[#fff8f0] outline-none"
+                              className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-3 py-2 text-[#fff8f0] outline-none focus:border-[#fb923c]/50"
                             />
                           </div>
                           <div>
@@ -1280,7 +1682,7 @@ export default function Projects() {
                               type="number"
                               value={margin}
                               onChange={(e) => setMargin(parseFloat(e.target.value) || 0)}
-                              className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-3 py-2 text-[#fff8f0] outline-none"
+                              className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-3 py-2 text-[#fff8f0] outline-none focus:border-[#fb923c]/50"
                             />
                           </div>
                         </div>
@@ -1292,7 +1694,7 @@ export default function Projects() {
                               type="number"
                               value={commission}
                               onChange={(e) => setCommission(parseFloat(e.target.value) || 0)}
-                              className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-3 py-1.5 text-xs text-[#fff8f0] outline-none"
+                              className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-2 py-1.5 text-xs text-[#fff8f0] outline-none focus:border-[#fb923c]/50"
                             />
                           </div>
                           <div>
@@ -1301,7 +1703,7 @@ export default function Projects() {
                               type="number"
                               value={taxPercent}
                               onChange={(e) => setTaxPercent(parseFloat(e.target.value) || 0)}
-                              className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-3 py-1.5 text-xs text-[#fff8f0] outline-none"
+                              className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-2 py-1.5 text-xs text-[#fff8f0] outline-none focus:border-[#fb923c]/50"
                             />
                           </div>
                           <div>
@@ -1310,7 +1712,7 @@ export default function Projects() {
                               type="number"
                               value={wastePercent}
                               onChange={(e) => setWastePercent(parseFloat(e.target.value) || 0)}
-                              className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-3 py-1.5 text-xs text-[#fff8f0] outline-none"
+                              className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-2 py-1.5 text-xs text-[#fff8f0] outline-none focus:border-[#fb923c]/50"
                             />
                           </div>
                         </div>
