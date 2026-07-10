@@ -1,38 +1,72 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import './index.css';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import React, { useState, useEffect } from "react";
+import "./index.css";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { 
-  LayoutDashboard, 
-  Users2, 
-  Layers, 
-  Calculator, 
   Activity, 
   Bot, 
-  Sparkles,
-  Menu,
-  X
-} from 'lucide-react';
-import CopilotDrawer from '../components/copilot-drawer';
+  Calculator, 
+  Home, 
+  Layers, 
+  LogOut, 
+  Menu, 
+  Users2, 
+  X,
+  BarChart2,
+  Package,
+  ShoppingCart,
+  DollarSign,
+  Settings,
+  HelpCircle
+} from "lucide-react";
+import CopilotDrawer from "../components/copilot-drawer";
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+const navItems = [
+  { name: "Inicio", path: "/dashboard", icon: Home },
+  { name: "Clientes", path: "/crm", icon: Users2 },
+  { name: "Projetos", path: "/projects", icon: Layers },
+  { name: "Orcamentos", path: "/budget", icon: Calculator },
+  { name: "Entregas", path: "/production", icon: Activity },
+  { name: "Relatórios", path: "/analytics", icon: BarChart2 },
+  { name: "Estoque", path: "/inventory", icon: Package },
+  { name: "Compras", path: "/purchases", icon: ShoppingCart },
+  { name: "Financeiro", path: "/financial", icon: DollarSign },
+  { name: "Configurações", path: "/settings", icon: Settings },
+  { name: "Suporte", path: "/help", icon: HelpCircle },
+];
+
+const pageTitles: Record<string, string> = {
+  dashboard: "Inicio",
+  crm: "Clientes",
+  projects: "Projetos",
+  budget: "Orcamentos",
+  production: "Entregas",
+  analytics: "Relatórios",
+  inventory: "Estoque",
+  purchases: "Compras",
+  financial: "Financeiro",
+  settings: "Configurações",
+  help: "Suporte",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [copilotOpen, setCopilotOpen] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const isLogin = pathname === "/login";
+  const currentSection = pathname?.split("/")?.[1] || "dashboard";
 
   // Auto-authenticate mock user for development
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const mockUser = {
         token: 'mock-jwt-token-2026',
-        name: 'Giselle Sousa',
-        email: 'giselle.sousa@kazahome.co',
+        name: 'Gustavo',
+        email: 'gustavo@kazahome.co',
         role: 'ADMIN',
         tenant: { name: 'Kaza Home Design', id: 'kaza-tenant-id' }
       };
@@ -40,106 +74,167 @@ export default function RootLayout({
     }
   }, []);
 
-  const navItems = [
-    { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
-    { name: 'CRM & WhatsApp', path: '/crm', icon: Users2 },
-    { name: 'Leitura de Projetos', path: '/projects', icon: Layers },
-    { name: 'Orçamentos & Plano', path: '/budget', icon: Calculator },
-    { name: 'Kanban de Produção', path: '/production', icon: Activity },
-  ];
+  async function logout() {
+    await fetch("/kazahome/api/logout", {
+      method: "POST"
+    });
+    router.replace("/login");
+    router.refresh();
+  }
 
   return (
     <html lang="pt-BR">
       <head>
-        <title>WoodFlow ERP — Marcenaria Inteligente</title>
-        <meta name="description" content="Plataforma SaaS premium de gestão e IA para marcenarias de alto padrão." />
+        <title>KazaHomeDesign | Painel interno</title>
+        <meta name="description" content="Painel privado KazaHomeDesign para clientes, projetos, orcamentos e entregas sob medida." />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
       </head>
-      <body className="bg-background bg-grid-pattern relative min-h-screen">
-        
-        {/* Glow ambient effects */}
-        <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] bg-emerald-500/5 rounded-full blur-[120px] pointer-events-none animate-pulse-slow"></div>
-        <div className="absolute bottom-[-10%] right-[-5%] w-[600px] h-[600px] bg-cyan-500/5 rounded-full blur-[150px] pointer-events-none"></div>
-
-        <div className="flex min-h-screen">
-          
-          {/* Sidebar Navigation */}
-          <aside className={`glass border-r border-border fixed md:static inset-y-0 left-0 z-40 w-64 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-0'} transition-transform duration-300 ease-in-out flex flex-col`}>
-            
-            {/* Logo */}
-            <div className="h-20 flex items-center px-6 border-b border-border gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-cyan-500 flex items-center justify-center shadow-glow-emerald">
-                <Sparkles className="w-5 h-5 text-background" />
-              </div>
-              <div>
-                <h1 className="text-lg font-bold tracking-tight bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">WoodFlow</h1>
-                <p className="text-[10px] text-gray-500 font-medium tracking-widest uppercase">Kaza Home Design</p>
-              </div>
-            </div>
-
-            {/* Menu Navigation */}
-            <nav className="flex-1 px-4 py-6 space-y-1">
-              {navItems.map((item) => {
-                const isActive = pathname === item.path || (item.path !== '/' && pathname?.startsWith(item.path));
-                return (
-                  <Link key={item.path} href={item.path}>
-                    <span className={`flex items-center gap-3.5 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer ${
-                      isActive 
-                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-glow-emerald' 
-                        : 'text-gray-400 hover:bg-gray-800/30 hover:text-gray-200 border border-transparent'
-                    }`}>
-                      <item.icon className="w-5 h-5" />
-                      {item.name}
-                    </span>
-                  </Link>
-                );
-              })}
-            </nav>
-
-            {/* AI Assistant Drawer Trigger */}
-            <div className="p-4 border-t border-border">
-              <button 
-                onClick={() => setCopilotOpen(true)}
-                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-background font-semibold text-sm flex items-center justify-center gap-2 hover:opacity-95 transition-opacity shadow-glow-emerald group"
-              >
-                <Bot className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                Copiloto WoodFlow
-              </button>
-            </div>
-          </aside>
-
-          {/* Main Area */}
-          <div className="flex-1 flex flex-col min-w-0">
-            
-            {/* Header */}
-            <header className="h-20 glass border-b border-border flex items-center justify-between px-6 md:px-10 sticky top-0 z-30">
-              <div className="flex items-center gap-4">
-                <h2 className="text-xl font-bold tracking-tight text-white capitalize">
-                  {pathname?.split('/')?.[1] || 'Dashboard'}
-                </h2>
-              </div>
-              
-              <div className="flex items-center gap-4">
-                {/* Active user status tag */}
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800/40 border border-border">
-                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                  <span className="text-xs font-semibold text-gray-300">Giselle Sousa</span>
+      <body className="min-h-screen bg-[#18120d] text-[#f8f0e6]">
+        {isLogin ? (
+          children
+        ) : (
+          <div className="min-h-screen bg-[radial-gradient(circle_at_10%_0%,rgba(207,158,99,0.16),transparent_32%),linear-gradient(135deg,#1e160f_0%,#18120d_42%,#0b0907_100%)]">
+            <div className="flex min-h-screen">
+              {/* Sidebar Navigation */}
+              <aside className="hidden w-72 shrink-0 border-r border-[#e8d4b8]/10 bg-[#211811]/86 px-5 py-5 backdrop-blur-xl lg:flex lg:flex-col">
+                {/* Logo */}
+                <div className="mb-8 flex items-center gap-3 px-2">
+                  <Logo />
+                  <div>
+                    <h1 className="text-xl font-semibold tracking-tight text-[#fff8f0]">KazaHomeDesign</h1>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-[#c89a63]">moveis sob medida</p>
+                  </div>
                 </div>
+
+                {/* Navigation Menu */}
+                <nav className="flex-1 space-y-1.5 overflow-y-auto pr-1 custom-scrollbar">
+                  {navItems.map((item) => (
+                    <NavLink
+                      key={item.path}
+                      item={item}
+                      pathname={pathname}
+                      onClick={() => setMobileMenuOpen(false)}
+                    />
+                  ))}
+                </nav>
+
+                {/* Copilot Drawer & Logout Triggers */}
+                <div className="space-y-3 border-t border-[#e8d4b8]/10 pt-4">
+                  <button
+                    onClick={() => setCopilotOpen(true)}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#ead5ba] px-4 py-3 text-sm font-bold text-[#20170f] transition hover:bg-[#ffe4bf]"
+                  >
+                    <Bot className="h-4 w-4" />
+                    Assistente Kaza
+                  </button>
+                  <button
+                    onClick={logout}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] px-4 py-2.5 text-sm font-semibold text-[#bba890] transition hover:text-[#fff8f0]"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Sair
+                  </button>
+                </div>
+              </aside>
+
+              {/* Main Content Area */}
+              <div className="flex min-w-0 flex-1 flex-col">
+                {/* Header */}
+                <header className="sticky top-0 z-40 border-b border-[#e8d4b8]/10 bg-[#18120d]/88 px-4 py-4 backdrop-blur-xl md:px-8">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => setMobileMenuOpen((value) => !value)}
+                        className="rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.05] p-2 text-[#ead5ba] lg:hidden"
+                        aria-label="Abrir menu"
+                      >
+                        {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+                      </button>
+                      <div className="lg:hidden">
+                        <Logo />
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#c89a63]">KazaHomeDesign</p>
+                        <h2 className="text-xl font-semibold tracking-tight text-[#fff8f0]">
+                          {pageTitles[currentSection] || "Painel"}
+                        </h2>
+                      </div>
+                    </div>
+
+                    {/* Profile indicator */}
+                    <div className="hidden items-center gap-2 rounded-full border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.05] px-3 py-1.5 text-xs font-semibold text-[#d4c1aa] sm:flex">
+                      <span className="h-2 w-2 rounded-full bg-[#d6ad79] animate-pulse"></span>
+                      Gustavo
+                    </div>
+                  </div>
+
+                  {/* Mobile Navigation Menu */}
+                  {mobileMenuOpen && (
+                    <nav className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:hidden max-h-60 overflow-y-auto pr-1">
+                      {navItems.map((item) => (
+                        <NavLink
+                          key={item.path}
+                          item={item}
+                          pathname={pathname}
+                          onClick={() => setMobileMenuOpen(false)}
+                          compact
+                        />
+                      ))}
+                    </nav>
+                  )}
+                </header>
+
+                {/* Page Content */}
+                <main className="flex-1 px-4 py-6 md:px-8 md:py-8 xl:px-10">
+                  <div className="mx-auto max-w-7xl">
+                    {children}
+                  </div>
+                </main>
               </div>
-            </header>
+            </div>
 
-            {/* Page content */}
-            <main className="flex-1 p-6 md:p-10">
-              {children}
-            </main>
+            {/* Copilot Drawer Panel */}
+            <CopilotDrawer isOpen={copilotOpen} onClose={() => setCopilotOpen(false)} />
           </div>
-        </div>
-
-        {/* Copilot Drawer Panel */}
-        <CopilotDrawer isOpen={copilotOpen} onClose={() => setCopilotOpen(false)} />
+        )}
       </body>
     </html>
+  );
+}
+
+function Logo() {
+  return (
+    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#f0d8ba]/40 bg-[#ead5ba] text-[#20170f] shadow-[0_14px_36px_rgba(0,0,0,0.24)]">
+      <span className="text-sm font-black tracking-tight">KH</span>
+    </div>
+  );
+}
+
+function NavLink({ 
+  item, 
+  pathname, 
+  onClick, 
+  compact = false 
+}: { 
+  item: typeof navItems[0]; 
+  pathname: string; 
+  onClick: () => void; 
+  compact?: boolean;
+}) {
+  const isActive = pathname === item.path || Boolean(pathname?.startsWith(`${item.path}/`));
+  const Icon = item.icon;
+  return (
+    <Link href={item.path} onClick={onClick}>
+      <span className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm font-semibold transition ${
+        isActive 
+          ? "border-[#d6ad79]/35 bg-[#d6ad79]/14 text-[#fff8f0] shadow-[0_14px_32px_rgba(0,0,0,0.18)]" 
+          : "border-transparent text-[#bba890] hover:border-[#e8d4b8]/12 hover:bg-[#fff7ed]/[0.05] hover:text-[#fff8f0]"
+      } ${compact ? "justify-center px-3 text-xs" : ""}`}>
+        <Icon className="h-4 w-4" />
+        {item.name}
+      </span>
+    </Link>
   );
 }
