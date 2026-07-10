@@ -6,6 +6,22 @@ import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
 
+/**
+ * Rendering DPI for the executive drawings. High DPI is required so GPT-4o Vision
+ * can read the fine red dimension cotas on A3 technical sheets.
+ */
+const PAGE_DPI = 200;
+/** How many Vision calls run in parallel (one per sheet). Keeps latency low without tripping rate limits. */
+const VISION_CONCURRENCY = 4;
+/** Safety cap so a monster PDF never explodes cost/latency. */
+const MAX_PAGES = 40;
+
+interface VisionConfig {
+  apiUrl: string;
+  headers: Record<string, string>;
+  model?: string;
+}
+
 @Controller('projects')
 export class ProjectController {
   constructor(
@@ -58,24 +74,28 @@ export class ProjectController {
     });
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  //  PDF → IMAGES
+  // ─────────────────────────────────────────────────────────────────────────
+
   /**
-   * Convert PDF buffer to PNG images using poppler's pdftoppm.
-   * Returns an array of base64 PNG strings, one per page.
+   * Convert a PDF buffer to an array of base64 PNG strings, one per page.
+   * Rendered at PAGE_DPI so the dimension cotas remain legible for the Vision model.
    */
-  private convertPdfToImages(pdfBuffer: Buffer): string[] {
+  private convertPdfToImages(pdfBuffer: Buffer, dpi: number = PAGE_DPI): string[] {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'woodflow-pdf-'));
     const pdfPath = path.join(tmpDir, 'input.pdf');
     fs.writeFileSync(pdfPath, pdfBuffer);
 
     try {
-      // Convert PDF to PNG images at 120 DPI (good balance between quality and size, prevents payload limits)
-      execSync(`pdftoppm -png -r 120 "${pdfPath}" "${path.join(tmpDir, 'page')}"`, {
-        timeout: 30000,
+      execSync(`pdftoppm -png -r ${dpi} "${pdfPath}" "${path.join(tmpDir, 'page')}"`, {
+        timeout: 120000,
+        maxBuffer: 1024 * 1024 * 64,
       });
 
-      // Read all generated page images
       const imageFiles = fs.readdirSync(tmpDir)
         .filter(f => f.startsWith('page') && f.endsWith('.png'))
+        // pdftoppm zero-pads page numbers, so a lexical sort keeps page order
         .sort();
 
       const images: string[] = [];
@@ -84,13 +104,11 @@ export class ProjectController {
         images.push(imgBuffer.toString('base64'));
       }
 
-      console.log(`[AI Reader] Converted PDF to ${images.length} page image(s).`);
+      console.log(`[AI Reader] Rendered PDF to ${images.length} page image(s) @ ${dpi} DPI.`);
       return images;
     } finally {
-      // Cleanup temp files
       try {
-        const files = fs.readdirSync(tmpDir);
-        for (const f of files) {
+        for (const f of fs.readdirSync(tmpDir)) {
           fs.unlinkSync(path.join(tmpDir, f));
         }
         fs.rmdirSync(tmpDir);
@@ -98,214 +116,272 @@ export class ProjectController {
     }
   }
 
-  /**
-   * Call OpenAI API (standard or Azure) with GPT-4o Vision to analyze images.
-   */
-  private async callGPT4oVision(
-    imageBase64Array: string[],
-    extractedText: string,
-  ): Promise<{ items: any[]; success: boolean }> {
+  // ─────────────────────────────────────────────────────────────────────────
+  //  VISION / LLM
+  // ─────────────────────────────────────────────────────────────────────────
 
-    // Determine which API to use: Standard OpenAI or Azure OpenAI
+  /** Resolve which API (Standard OpenAI or Azure OpenAI) to use, or null if unconfigured. */
+  private getVisionConfig(): VisionConfig | null {
     const standardKey = process.env.OPENAI_API_KEY;
     const azureKey = process.env.AZURE_OPENAI_API_KEY;
     const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
     const model = process.env.OPENAI_MODEL || 'gpt-4o';
 
-    let apiUrl: string;
-    let headers: Record<string, string>;
-
     if (standardKey) {
-      // Standard OpenAI API
-      apiUrl = 'https://api.openai.com/v1/chat/completions';
-      headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${standardKey}`,
+      return {
+        apiUrl: 'https://api.openai.com/v1/chat/completions',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${standardKey}`,
+        },
+        model,
       };
-      console.log('[AI Reader] Using Standard OpenAI API with model:', model);
-    } else if (azureKey && azureEndpoint) {
-      // Azure OpenAI API
-      const cleanEndpoint = azureEndpoint.endsWith('/') ? azureEndpoint.slice(0, -1) : azureEndpoint;
-      const deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4o';
-      apiUrl = `${cleanEndpoint}/openai/deployments/${deploymentName}/chat/completions?api-version=2024-02-15-preview`;
-      headers = {
-        'Content-Type': 'application/json',
-        'api-key': azureKey,
-      };
-      console.log('[AI Reader] Using Azure OpenAI API.');
-    } else {
-      console.warn('[AI Reader] No OpenAI API key found. Falling back to mock data.');
-      return { items: [], success: false };
     }
 
-    const systemPrompt = `Você é um projetista técnico sênior especialista em marcenaria de alto padrão, leitura de plantas executivas de móveis sob medida e detalhamento de fabricação.
+    if (azureKey && azureEndpoint) {
+      const cleanEndpoint = azureEndpoint.endsWith('/') ? azureEndpoint.slice(0, -1) : azureEndpoint;
+      const deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4o';
+      return {
+        apiUrl: `${cleanEndpoint}/openai/deployments/${deploymentName}/chat/completions?api-version=2024-02-15-preview`,
+        headers: {
+          'Content-Type': 'application/json',
+          'api-key': azureKey,
+        },
+        // Azure carries the deployment in the URL, so no model field in the body.
+      };
+    }
 
-Sua tarefa é analisar TODAS as páginas do projeto de marcenaria enviado (plantas, elevações, vistas, cortes técnicos, detalhes de cotas e memoriais) e extrair com MÁXIMA PRECISÃO cada módulo (Caixa), porta, gaveta, prateleira, tampo, painel e acessório.
+    console.warn('[AI Reader] No OpenAI/Azure key configured.');
+    return null;
+  }
 
-REGRAS OBRIGATÓRIAS DE LEITURA E EXTRAÇÃO DE MEDIDAS:
-1. **Sistema de Escala e Medidas (IMPORTANTE)**:
-   * As cotas numéricas nos desenhos executivos apresentados (como 239, 195, 148, 100, 97, 55, 48) estão em **Centímetros (cm)**.
-   * Você deve OBRIGATORIAMENTE converter todas as medidas para **Milímetros (mm)** multiplicando o valor por 10 (ex: 239 -> 2390mm, 148 -> 1480mm, 55 -> 550mm, 18 -> 180mm).
-   * NUNCA retorne os números puros das cotas em centímetros nos campos de milímetros (ex: largura 148 é ERRO, o correto é 1480).
+  /**
+   * System prompt for a SINGLE executive sheet. Deliberately free of hard-coded
+   * example numbers so the model reads the drawing instead of echoing the prompt.
+   */
+  private buildSystemPrompt(): string {
+    return `Você é um projetista técnico sênior especialista em marcenaria de alto padrão e detalhamento de fabricação. Você recebe UMA folha de um projeto executivo (elevações, vistas internas, cortes, vista 3D, planta baixa, cotas e legendas).
 
-2. **Prevenção de Inversão de Eixos (Largura x Altura x Profundidade)**:
-   * **Largura (Width)**: É a dimensão **horizontal** da peça/módulo na vista frontal ou elevação.
-   * **Altura (Height)**: É a dimensão **vertical** da peça/módulo na vista frontal ou elevação.
-   * **Profundidade (Depth)**: É a distância de frente para trás do móvel, geralmente encontrada em plantas baixas, cortes laterais, vistas 3D ou descrita no texto técnico (ex: "com profundidade de 50cm" -> depth: 500).
-   * Valide a lógica física: Armários altos e roupeiros possuem a Altura (H) muito maior que a Largura (W) (ex: Altura 2390mm e Largura 500mm). Não inverta a orientação horizontal com a vertical!
+Sua tarefa: extrair com MÁXIMA PRECISÃO e COMPLETUDE **cada** peça desenhada nesta folha — o módulo principal (caixa/estrutura) E todas as suas subpeças (portas, gavetas, prateleiras, nichos, tampos, painéis, cabeceiras, bancadas). NÃO resuma: enumere tudo. Uma folha densa normalmente rende de 8 a 25 peças.
 
-3. **Estrutura Hierárquica de Módulos e Sub-peças**:
-   * Identifique o móvel principal (ex: Armário Superior, Armário Inferior, Cômoda, Cama, Painel, Bancada) e extraia a sua estrutura principal como tipo "Caixa" ou "Aéreo" com suas medidas externas totais.
-   * A seguir, extraia cada sub-peça interna/frontal associada a esse móvel (Portas, Gavetas, Prateleiras) com as dimensões específicas mostradas nas subdivisões das cotas:
-     * Exemplo (Cômoda 148cm de largura e 100cm de altura):
-       - Caixa da Cômoda: W: 1480, H: 1000, D: 550.
-       - Gavetas (Três): W: 490 (ou 500), H: 190, D: 500, Qty: 3 (ItemType: "Gaveta").
-       - Portas (Três): W: 480 (ou 470), H: 700, D: 18, Qty: 3 (ItemType: "Porta").
-     * Exemplo (Armário Escritório/Quarto):
-       - Caixa Lateral/Torre: W: 250 (ou similar), H: 2390, D: 500.
-       - Aéreo Ponte: W: 1950, H: 1130 (ou altura correspondente), D: 500.
-       - Portas de Giro de Vidro: W: 410, H: 2390, D: 20, Qty: 2.
+REGRAS DE LEITURA:
 
-4. **Identificação de Materiais**:
-   * Localize a legenda de "MATERIAIS" ou as anotações apontadas por setas (ex: MDF Beton - Guararapes, MDF Preto Trama - Duratex, Madeira Natural Cinamomo Polido Fosco, MDF Freijó, MDF Itapuã, Couro Marrom, Espelho Prata). Atribua o material correto correspondente a cada peça extraída.
+1. ESCALA DAS COTAS → As cotas numéricas destes desenhos estão em CENTÍMETROS (cm). Converta OBRIGATORIAMENTE para MILÍMETROS multiplicando por 10 (uma cota "148" vira 1480; "55" vira 550; "3" vira 30). Nunca devolva o número puro da cota nos campos em mm. Leia o valor real impresso ao lado da linha de cota vermelha — não estime.
 
-Retorne APENAS um objeto JSON com a chave "items" contendo um array de objetos nesta estrutura EXATA:
+2. EIXOS (não inverta) →
+   • width (largura): dimensão HORIZONTAL na elevação/vista frontal.
+   • height (altura): dimensão VERTICAL na elevação/vista frontal.
+   • depth (profundidade): distância frente↔fundo, lida no CORTE lateral, na planta baixa ou na vista 3D.
+   Valide a lógica física: torres e roupeiros têm altura >> largura; prateleiras e tampos têm profundidade relevante e espessura fina.
+
+3. ESPESSURA → thickness é a espessura do material (tipicamente 18mm para MDF; portas/frentes ~18-20mm; costas/fundo ~6-15mm). O eixo "fino" de uma porta é a profundidade; de uma prateleira/tampo é a altura. NUNCA retorne 0 em uma dimensão: se for o eixo fino da peça, use a espessura.
+
+4. HIERARQUIA → Primeiro o módulo (itemType "Caixa", "Aéreo", "Painel", "Estante") com as medidas EXTERNAS totais; depois cada subpeça (Porta, Gaveta, Prateleira, Nicho, Tampo, Cabideiro) com suas medidas próprias e quantity correta (ex.: "3 gavetas iguais" → um item com quantity 3).
+
+5. AMBIENTE → Leia o título da própria folha (normalmente no canto superior, ex.: "EXECUTIVO MARCENÁRIA: ESCRITÓRIO/QUARTO" → environment "Escritório/Quarto") ou a legenda. Se a folha mostrar mais de um móvel de ambientes distintos, use o ambiente correto para cada um.
+
+6. MATERIAL E ACABAMENTO → Leia a legenda "MATERIAIS" e as chamadas com seta (ex.: "MDF Beton - Guararapes", "MDF Preto Trama - Duratex", "Espelho Prata", "Vidro Reflecta Fumê", "Madeira Natural Cinamomo"). Preencha materialType com o material, cor com o tom/cor quando indicado, e acabamento (ex.: "Polido Fosco", "Laqueado", "Fita de LED 3000k") quando descrito.
+
+7. OBSERVAÇÕES → Registre em observacoes qualquer nota técnica relevante da peça (ex.: "recorte para fita de led 3000k", "porta com sistema invisível S150", "puxador tipo fecho e toque", "perfil P1145 preto"). Em codigo, coloque a referência da peça quando houver (letras/números de balão como "A", "B", "C", "D", "E").
+
+Retorne SOMENTE um objeto JSON puro (sem markdown, sem crases, sem texto fora do JSON) no formato:
 {
   "items": [
     {
-      "environment": "Nome do Ambiente (ex: Escritório, Quarto, Banheiro Social, etc.)",
-      "itemType": "Caixa|Porta|Gaveta|Prateleira|Tampo|Rodapé|Fundo|Testeira|Ferragem|Aéreo|Painel|Cabeceira|Mesa",
-      "description": "Descrição clara e técnica da peça com acabamento e especificações",
+      "environment": "string",
+      "itemType": "Caixa|Aéreo|Painel|Estante|Porta|Gaveta|Prateleira|Nicho|Tampo|Bancada|Cabeceira|Mesa|Rodapé|Fundo|Cabideiro|Ferragem",
+      "description": "descrição técnica clara da peça",
+      "codigo": "referência/balão (ou vazio)",
       "width": 0,
       "height": 0,
       "depth": 0,
       "thickness": 18,
       "quantity": 1,
-      "materialType": "Nome do material extraído da legenda/chamada"
+      "materialType": "material principal",
+      "cor": "cor/tom (ou vazio)",
+      "acabamento": "acabamento (ou vazio)",
+      "observacoes": "notas técnicas (ou vazio)"
     }
   ]
 }
 
-NÃO invente dados. Extraia APENAS o que está documentado nas cotas e descrições do PDF. Se uma dimensão não estiver clara, use 0.
-NÃO inclua markdown, backticks ou texto explicativo — retorne SOMENTE o JSON puro.`;
+Extraia APENAS o que está documentado nas cotas e chamadas desta folha. Não invente peças de outras folhas. Se um móvel não tiver cota visível para uma dimensão, deduza pela proporção do desenho e pela espessura — mas nunca deixe 0.`;
+  }
 
-    // Build user message content
-    let userMessageContent: any;
-
-    if (imageBase64Array.length === 0) {
-      // Text-only completion
-      userMessageContent = `Analise este projeto executivo de marcenaria. Extraia TODAS as peças de TODOS os ambientes com suas medidas reais para fabricação.\n\nTexto extraído do documento:\n${extractedText.substring(0, 12000)}`;
-    } else {
-      // Multimodal image + text completion
-      const contentParts: any[] = [];
-      contentParts.push({
-        type: 'text',
-        text: `Analise este projeto executivo de marcenaria com ${imageBase64Array.length} página(s). Extraia TODAS as peças de TODOS os ambientes com suas medidas reais para fabricação.${
-          extractedText
-            ? `\n\nTexto extraído do documento para referência adicional:\n${extractedText.substring(0, 8000)}`
-            : ''
-        }`,
-      });
-
-      // Add page images (limit to first 8 pages)
-      const maxPages = Math.min(imageBase64Array.length, 8);
-      for (let i = 0; i < maxPages; i++) {
-        contentParts.push({
-          type: 'image_url',
-          image_url: {
-            url: `data:image/png;base64,${imageBase64Array[i]}`,
-            detail: 'high',
-          },
-        });
-      }
-      userMessageContent = contentParts;
-    }
-
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userMessageContent },
-    ];
-
+  /** Low-level chat completion call. Returns the raw content string or null. */
+  private async callVision(
+    cfg: VisionConfig,
+    messages: any[],
+    maxTokens: number,
+  ): Promise<string | null> {
     const requestBody: any = {
       messages,
-      max_tokens: 4096,
+      max_tokens: maxTokens,
       temperature: 0,
-      response_format: { type: 'json_object' }
+      response_format: { type: 'json_object' },
     };
-
-    // Only use model param for standard OpenAI (Azure uses deployment name in URL)
-    if (standardKey) {
-      requestBody.model = model;
-    }
-
-    console.log(`[AI Reader] Sending request to GPT-4o with ${imageBase64Array.length} images...`);
-
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error('[AI Reader] GPT-4o Vision request failed:', response.status, errText);
-      return { items: [], success: false };
-    }
-
-    const resData = await response.json();
-    const content = resData.choices?.[0]?.message?.content;
-
-    if (!content) {
-      console.error('[AI Reader] GPT-4o Vision returned empty content.');
-      return { items: [], success: false };
-    }
-
-    console.log('[AI Reader] GPT-4o Vision raw response length:', content.length);
+    if (cfg.model) requestBody.model = cfg.model;
 
     try {
-      // Clean the response: remove markdown code blocks if present
-      let cleanContent = content.trim();
-      if (cleanContent.startsWith('```json')) {
-        cleanContent = cleanContent.slice(7);
+      const response = await fetch(cfg.apiUrl, {
+        method: 'POST',
+        headers: cfg.headers,
+        body: JSON.stringify(requestBody),
+      });
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error('[AI Reader] Vision request failed:', response.status, errText.substring(0, 300));
+        return null;
       }
-      if (cleanContent.startsWith('```')) {
-        cleanContent = cleanContent.slice(3);
-      }
-      if (cleanContent.endsWith('```')) {
-        cleanContent = cleanContent.slice(0, -3);
-      }
-      cleanContent = cleanContent.trim();
+      const data = await response.json();
+      return data.choices?.[0]?.message?.content || null;
+    } catch (err) {
+      console.error('[AI Reader] Vision request error:', err);
+      return null;
+    }
+  }
 
-      let parsed = JSON.parse(cleanContent);
+  /** Parse the model's JSON content into an items array, tolerating various shapes. */
+  private extractItemsFromContent(content: string | null): any[] {
+    if (!content) return [];
+    try {
+      let clean = content.trim();
+      if (clean.startsWith('```json')) clean = clean.slice(7);
+      if (clean.startsWith('```')) clean = clean.slice(3);
+      if (clean.endsWith('```')) clean = clean.slice(0, -3);
+      clean = clean.trim();
 
-      // Handle various response shapes
+      let parsed: any = JSON.parse(clean);
       if (parsed && !Array.isArray(parsed)) {
-        if (parsed.items && Array.isArray(parsed.items)) {
-          parsed = parsed.items;
-        } else if (parsed.pecas && Array.isArray(parsed.pecas)) {
-          parsed = parsed.pecas;
-        } else {
-          // Try to find the first array property
+        if (Array.isArray(parsed.items)) parsed = parsed.items;
+        else if (Array.isArray(parsed.pecas)) parsed = parsed.pecas;
+        else {
           for (const key of Object.keys(parsed)) {
-            if (Array.isArray(parsed[key])) {
-              parsed = parsed[key];
-              break;
-            }
+            if (Array.isArray(parsed[key])) { parsed = parsed[key]; break; }
           }
         }
       }
-
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        console.log(`[AI Reader] Successfully extracted ${parsed.length} real items from GPT-4o Vision.`);
-        return { items: parsed, success: true };
-      }
-    } catch (parseErr) {
-      console.error('[AI Reader] Failed to parse GPT-4o Vision JSON response:', parseErr);
-      console.error('[AI Reader] Raw content was:', content.substring(0, 500));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+      console.error('[AI Reader] JSON parse failed:', err, '| raw:', content.substring(0, 200));
+      return [];
     }
-
-    return { items: [], success: false };
   }
+
+  /** Analyze a single sheet image and return its extracted items. */
+  private async analyzePage(
+    cfg: VisionConfig,
+    imageBase64: string,
+    pageIndex: number,
+    totalPages: number,
+  ): Promise<any[]> {
+    const userContent: any[] = [
+      {
+        type: 'text',
+        text: `Esta é a folha ${pageIndex + 1} de ${totalPages} de um projeto executivo de marcenaria sob medida. Analise SOMENTE esta folha e extraia TODAS as peças (módulo principal e cada subpeça) com suas medidas reais de fabricação em milímetros.`,
+      },
+      {
+        type: 'image_url',
+        image_url: { url: `data:image/png;base64,${imageBase64}`, detail: 'high' },
+      },
+    ];
+
+    const messages = [
+      { role: 'system', content: this.buildSystemPrompt() },
+      { role: 'user', content: userContent },
+    ];
+
+    const content = await this.callVision(cfg, messages, 4096);
+    const items = this.extractItemsFromContent(content);
+    console.log(`[AI Reader] Sheet ${pageIndex + 1}/${totalPages}: ${items.length} item(s).`);
+    return items;
+  }
+
+  /** Run async tasks over a list with a bounded concurrency pool. */
+  private async runPool<T, R>(
+    items: T[],
+    limit: number,
+    fn: (item: T, idx: number) => Promise<R>,
+  ): Promise<R[]> {
+    const results: R[] = new Array(items.length);
+    let cursor = 0;
+    const workerCount = Math.min(limit, items.length) || 1;
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const i = cursor++;
+        if (i >= items.length) break;
+        results[i] = await fn(items[i], i);
+      }
+    });
+    await Promise.all(workers);
+    return results;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  NORMALIZATION
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Clean raw model items: coerce numbers, drop empty rows, and — crucially —
+   * replace any 0 primary dimension with the panel thickness so the 3D engine
+   * renders a real board instead of a flat plane.
+   */
+  private sanitizeItems(rawItems: any[]): any[] {
+    const out: any[] = [];
+    for (const raw of rawItems) {
+      const num = (v: any) => {
+        const n = Number(v);
+        return Number.isFinite(n) && n > 0 ? n : 0;
+      };
+
+      let w = num(raw.width);
+      let h = num(raw.height);
+      let d = num(raw.depth);
+      let t = num(raw.thickness) || 18;
+
+      // Need at least two real dimensions to be a meaningful piece.
+      const realDims = [w, h, d].filter((x) => x > 0).length;
+      if (realDims < 2) continue;
+
+      // Fill the missing (thin) axis with the material thickness — never leave a 0.
+      if (w === 0) w = t;
+      if (h === 0) h = t;
+      if (d === 0) d = t;
+
+      const width = Math.round(w);
+      const height = Math.round(h);
+      const depth = Math.round(d);
+      const thickness = Math.round(t);
+      const quantity = Math.max(1, Math.round(Number(raw.quantity) || 1));
+
+      // Derived production metrics (m² face area, m³ volume) per the whole quantity.
+      const area = +(((width * height) / 1_000_000) * quantity).toFixed(3);
+      const volume = +(((width * height * thickness) / 1_000_000_000) * quantity).toFixed(4);
+
+      out.push({
+        environment: String(raw.environment || 'Ambiente').substring(0, 191),
+        itemType: String(raw.itemType || 'Caixa').substring(0, 100),
+        description: String(raw.description || 'Peça estrutural').substring(0, 500),
+        codigo: raw.codigo ? String(raw.codigo).substring(0, 60) : null,
+        width,
+        height,
+        depth,
+        thickness,
+        quantity,
+        materialType: String(raw.materialType || 'MDF 18mm').substring(0, 191),
+        cor: raw.cor ? String(raw.cor).substring(0, 100) : null,
+        acabamento: raw.acabamento ? String(raw.acabamento).substring(0, 191) : null,
+        observacoes: raw.observacoes ? String(raw.observacoes).substring(0, 500) : null,
+        area,
+        volume,
+      });
+    }
+    return out;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  PARSE ENDPOINT
+  // ─────────────────────────────────────────────────────────────────────────
 
   @Post(':id/parse')
   async parseProjectFile(
@@ -316,118 +392,135 @@ NÃO inclua markdown, backticks ou texto explicativo — retorne SOMENTE o JSON 
     const tenantId = this.verifyTokenAndGetTenantId(authHeader);
     const { filename, fileBase64, mimeType } = body;
 
-    const project = await this.prisma.project.findFirst({
-      where: { id, tenantId },
-    });
-
+    const project = await this.prisma.project.findFirst({ where: { id, tenantId } });
     if (!project) {
       throw new HttpException('Project not found', HttpStatus.NOT_FOUND);
     }
 
-    // Update project status to PARSING
     await this.prisma.project.update({
       where: { id },
-      data: { originalFileUrl: filename || 'planta_baixa.pdf' },
+      data: {
+        originalFileUrl: filename || 'planta_baixa.pdf',
+        parseStatus: 'EXTRACTING',
+        parseProgress: 5,
+        parseError: null,
+      },
     });
 
-    // Clean existing parsed items
+    // Wipe previous extraction so re-parses start clean.
     await this.prisma.projectItem.deleteMany({ where: { projectId: id } });
 
-    let parsedItems: any[] = [];
+    let sanitized: any[] = [];
     let isRealParsing = false;
+    let parseError: string | null = null;
 
-    if (fileBase64 && mimeType) {
+    try {
+      if (!fileBase64 || !mimeType) {
+        throw new Error('Arquivo ausente no payload.');
+      }
+
+      const cfg = this.getVisionConfig();
+      if (!cfg) {
+        throw new Error('Motor de IA (OpenAI/Azure) não configurado no servidor.');
+      }
+
       const buffer = Buffer.from(fileBase64, 'base64');
       const isPdf = mimeType === 'application/pdf' || filename?.toLowerCase().endsWith('.pdf');
 
-      try {
-        let extractedText = '';
-
-        // STEP 1: Extract text from PDF using pdf-parse (for text-based PDFs)
-        if (isPdf) {
-          try {
-            const pdfModule = require('pdf-parse');
-            const PDFParseClass = pdfModule.PDFParse;
-            if (typeof PDFParseClass === 'function') {
-              // Custom class in this project requires Uint8Array rather than Buffer
-              const uint8 = new Uint8Array(buffer);
-              const parser = new PDFParseClass(uint8);
-              const pdfData = await parser.getText();
+      // Extract embedded text (used only as a last-resort fallback).
+      let extractedText = '';
+      if (isPdf) {
+        try {
+          const pdfModule = require('pdf-parse');
+          const PDFParseClass = pdfModule.PDFParse;
+          if (typeof PDFParseClass === 'function') {
+            const parser = new PDFParseClass(new Uint8Array(buffer));
+            const pdfData = await parser.getText();
+            extractedText = pdfData.text || '';
+          } else {
+            const pdfParser = typeof pdfModule === 'function' ? pdfModule : (pdfModule.default || pdfModule);
+            if (typeof pdfParser === 'function') {
+              const pdfData = await pdfParser(buffer);
               extractedText = pdfData.text || '';
-              console.log(`[AI Reader] PDF text extraction (Custom PDFParse): ${extractedText.length} chars.`);
-            } else {
-              // Standard pdf-parse function export
-              const pdfParser = typeof pdfModule === 'function' ? pdfModule : (pdfModule.default || pdfModule);
-              if (typeof pdfParser === 'function') {
-                const pdfData = await pdfParser(buffer);
-                extractedText = pdfData.text || '';
-                console.log(`[AI Reader] PDF text extraction (Standard pdf-parse): ${extractedText.length} chars.`);
-              } else {
-                console.warn('[AI Reader] pdf-parse module has unexpected export shape:', typeof pdfModule);
-              }
             }
-          } catch (pdfErr) {
-            console.warn('[AI Reader] pdf-parse failed:', pdfErr);
           }
+          console.log(`[AI Reader] PDF text extraction: ${extractedText.length} chars.`);
+        } catch (pdfErr) {
+          console.warn('[AI Reader] pdf-parse failed:', pdfErr);
         }
-
-        // STEP 2: Convert PDF pages to images using pdftoppm
-        let pageImages: string[] = [];
-        if (isPdf) {
-          try {
-            pageImages = this.convertPdfToImages(buffer);
-          } catch (convertErr) {
-            console.warn('[AI Reader] PDF-to-image conversion failed:', convertErr);
-          }
-        } else {
-          // For direct image uploads, use the uploaded image as-is
-          pageImages = [fileBase64];
-        }
-
-        // STEP 3: Send images + text to GPT-4o Vision for analysis
-        if (pageImages.length > 0) {
-          const result = await this.callGPT4oVision(pageImages, extractedText);
-          if (result.success && result.items.length > 0) {
-            parsedItems = result.items;
-            isRealParsing = true;
-          }
-        }
-
-        // STEP 4: If Vision failed but we have text, try text-only completion
-        if (!isRealParsing && extractedText.length > 100) {
-          console.log('[AI Reader] Vision failed, trying text-only GPT completion...');
-          const result = await this.callGPT4oVision([], extractedText);
-          if (result.success && result.items.length > 0) {
-            parsedItems = result.items;
-            isRealParsing = true;
-          }
-        }
-
-      } catch (err) {
-        console.error('[AI Reader] Error during document analysis:', err);
       }
+
+      // Render each sheet to a high-DPI image.
+      let pageImages: string[] = [];
+      if (isPdf) {
+        pageImages = this.convertPdfToImages(buffer).slice(0, MAX_PAGES);
+      } else {
+        pageImages = [fileBase64]; // direct image upload
+      }
+
+      await this.prisma.project.update({
+        where: { id },
+        data: { parseStatus: 'INTERPRETING', parseProgress: 25 },
+      });
+
+      // Analyze every sheet independently, in parallel — the core of the accuracy fix.
+      let rawItems: any[] = [];
+      if (pageImages.length > 0) {
+        const perPage = await this.runPool(
+          pageImages,
+          VISION_CONCURRENCY,
+          (img, idx) => this.analyzePage(cfg, img, idx, pageImages.length),
+        );
+        rawItems = perPage.flat();
+      }
+
+      // Last resort: if imagery produced nothing but we have text, try a text pass.
+      if (rawItems.length === 0 && extractedText.length > 100) {
+        console.log('[AI Reader] No items from imagery, attempting text-only pass...');
+        const messages = [
+          { role: 'system', content: this.buildSystemPrompt() },
+          {
+            role: 'user',
+            content: `Analise este projeto executivo de marcenaria a partir do texto extraído e extraia TODAS as peças de TODOS os ambientes.\n\nTexto:\n${extractedText.substring(0, 14000)}`,
+          },
+        ];
+        rawItems = this.extractItemsFromContent(await this.callVision(cfg, messages, 4096));
+      }
+
+      sanitized = this.sanitizeItems(rawItems);
+      isRealParsing = sanitized.length > 0;
+      console.log(`[AI Reader] Aggregated ${rawItems.length} raw → ${sanitized.length} sanitized item(s).`);
+    } catch (err: any) {
+      parseError = err?.message || 'Falha na análise do documento.';
+      console.error('[AI Reader] Parse error:', err);
     }
 
-    // FALLBACK: If no real items were parsed, keep it empty
-    if (parsedItems.length === 0) {
-      console.warn('[AI Reader] All parsing tiers failed or returned no items. No mock fallback data will be inserted.');
-    }
+    await this.prisma.project.update({
+      where: { id },
+      data: { parseStatus: 'VALIDATING', parseProgress: 85 },
+    });
 
-    // Save items to database
+    // Persist the extracted pieces.
     const items = [];
-    for (const item of parsedItems) {
+    for (const item of sanitized) {
       const createdItem = await this.prisma.projectItem.create({
         data: {
           projectId: id,
-          environment: String(item.environment || 'Ambiente').substring(0, 191),
-          itemType: String(item.itemType || 'Caixa').substring(0, 100),
-          description: String(item.description || 'Peça estrutural').substring(0, 500),
-          width: Number(item.width) || 0,
-          height: Number(item.height) || 0,
-          depth: Number(item.depth) || 0,
-          thickness: Number(item.thickness) || 0,
-          quantity: Number(item.quantity) || 1,
-          materialType: String(item.materialType || 'MDF 18mm').substring(0, 191),
+          environment: item.environment,
+          itemType: item.itemType,
+          description: item.description,
+          codigo: item.codigo,
+          width: item.width,
+          height: item.height,
+          depth: item.depth,
+          thickness: item.thickness,
+          quantity: item.quantity,
+          materialType: item.materialType,
+          cor: item.cor,
+          acabamento: item.acabamento,
+          observacoes: item.observacoes,
+          area: item.area,
+          volume: item.volume,
         },
       });
       items.push(createdItem);
@@ -435,21 +528,33 @@ NÃO inclua markdown, backticks ou texto explicativo — retorne SOMENTE o JSON 
 
     const uniqueEnvironments = Array.from(new Set(items.map((i) => i.environment)));
 
-    // Write timeline update to Lead if linked
+    await this.prisma.project.update({
+      where: { id },
+      data: {
+        parseStatus: parseError ? 'FAILED' : 'COMPLETED',
+        parseProgress: 100,
+        parseError,
+      },
+    });
+
     if (project.leadId) {
       try {
         await this.prisma.leadTimeline.create({
           data: {
             leadId: project.leadId,
             type: 'SYSTEM',
-            content: `${isRealParsing ? 'GPT-4o Vision AI' : 'Simulador de IA'} analisou o arquivo "${filename || 'projeto.pdf'}", identificou ${uniqueEnvironments.length} ambiente(s) (${uniqueEnvironments.join(', ')}), extraindo ${items.length} itens com medidas técnicas de produção.`,
-            author: isRealParsing ? 'GPT-4o Vision AI Reader' : 'Fallback Parser',
+            content: `${isRealParsing ? 'GPT-4o Vision AI' : 'Analisador'} processou "${filename || 'projeto.pdf'}": ${uniqueEnvironments.length} ambiente(s) (${uniqueEnvironments.join(', ')}), ${items.length} peças com medidas de produção.`,
+            author: isRealParsing ? 'GPT-4o Vision AI Reader' : 'Analisador de Projetos',
           },
         });
       } catch { /* ignore timeline errors */ }
     }
 
-    console.log(`[AI Reader] DONE: ${items.length} items saved, real=${isRealParsing}, environments=${uniqueEnvironments.join(', ')}`);
+    console.log(`[AI Reader] DONE: ${items.length} items, real=${isRealParsing}, envs=${uniqueEnvironments.join(', ')}`);
+
+    if (parseError && items.length === 0) {
+      throw new HttpException(parseError, HttpStatus.UNPROCESSABLE_ENTITY);
+    }
 
     return {
       success: true,
