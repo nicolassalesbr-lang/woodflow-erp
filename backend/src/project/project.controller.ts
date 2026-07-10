@@ -138,39 +138,55 @@ export class ProjectController {
       return { items: [], success: false };
     }
 
-    const systemPrompt = `Você é um projetista técnico sênior especialista em marcenaria de alto padrão, leitura de plantas e projetos executivos de móveis sob medida.
+    const systemPrompt = `Você é um projetista técnico sênior especialista em marcenaria de alto padrão, leitura de plantas executivas de móveis sob medida e detalhamento de fabricação.
 
-Sua tarefa é analisar TODAS as páginas do projeto de marcenaria enviado (plantas, elevações, detalhes técnicos, listas de corte, memoriais descritivos) e extrair com MÁXIMA PRECISÃO cada peça, módulo, porta, gaveta, prateleira e ferragem necessários para fabricação.
+Sua tarefa é analisar TODAS as páginas do projeto de marcenaria enviado (plantas, elevações, vistas, cortes técnicos, detalhes de cotas e memoriais) e extrair com MÁXIMA PRECISÃO cada módulo (Caixa), porta, gaveta, prateleira, tampo, painel e acessório.
 
-REGRAS OBRIGATÓRIAS:
-1. Leia CADA PÁGINA do projeto atentamente — podem haver plantas baixas, vistas frontais, laterais, detalhes de corte, tabelas de medidas.
-2. Identifique TODOS os ambientes do projeto (ex: Cozinha, Dormitório Casal, Lavanderia, Home Office, Banheiro, Sala).
-3. Para CADA ambiente, extraia TODOS os itens de marcenaria com suas medidas reais em milímetros.
-4. Se encontrar tabelas de corte ou listas de materiais, use-as como fonte primária de dados.
-5. Diferencie tipos de peças: Caixa (estrutura do módulo), Porta, Gaveta, Prateleira, Tampo, Rodapé, Fundo, Testeira, Ferragem.
-6. Se o documento mencionar materiais específicos (tipo de MDF, cor, espessura), capture-os fielmente.
-7. Ferragens devem ser listadas separadamente (dobradiças, corrediças, puxadores, pistões, trincos).
-8. Se uma medida estiver em centímetros no documento, converta para milímetros (multiplique por 10).
-9. Se uma medida estiver em metros, converta para milímetros (multiplique por 1000).
+REGRAS OBRIGATÓRIAS DE LEITURA E EXTRAÇÃO DE MEDIDAS:
+1. **Sistema de Escala e Medidas (IMPORTANTE)**:
+   * As cotas numéricas nos desenhos executivos apresentados (como 239, 195, 148, 100, 97, 55, 48) estão em **Centímetros (cm)**.
+   * Você deve OBRIGATORIAMENTE converter todas as medidas para **Milímetros (mm)** multiplicando o valor por 10 (ex: 239 -> 2390mm, 148 -> 1480mm, 55 -> 550mm, 18 -> 180mm).
+   * NUNCA retorne os números puros das cotas em centímetros nos campos de milímetros (ex: largura 148 é ERRO, o correto é 1480).
+
+2. **Prevenção de Inversão de Eixos (Largura x Altura x Profundidade)**:
+   * **Largura (Width)**: É a dimensão **horizontal** da peça/módulo na vista frontal ou elevação.
+   * **Altura (Height)**: É a dimensão **vertical** da peça/módulo na vista frontal ou elevação.
+   * **Profundidade (Depth)**: É a distância de frente para trás do móvel, geralmente encontrada em plantas baixas, cortes laterais, vistas 3D ou descrita no texto técnico (ex: "com profundidade de 50cm" -> depth: 500).
+   * Valide a lógica física: Armários altos e roupeiros possuem a Altura (H) muito maior que a Largura (W) (ex: Altura 2390mm e Largura 500mm). Não inverta a orientação horizontal com a vertical!
+
+3. **Estrutura Hierárquica de Módulos e Sub-peças**:
+   * Identifique o móvel principal (ex: Armário Superior, Armário Inferior, Cômoda, Cama, Painel, Bancada) e extraia a sua estrutura principal como tipo "Caixa" ou "Aéreo" com suas medidas externas totais.
+   * A seguir, extraia cada sub-peça interna/frontal associada a esse móvel (Portas, Gavetas, Prateleiras) com as dimensões específicas mostradas nas subdivisões das cotas:
+     * Exemplo (Cômoda 148cm de largura e 100cm de altura):
+       - Caixa da Cômoda: W: 1480, H: 1000, D: 550.
+       - Gavetas (Três): W: 490 (ou 500), H: 190, D: 500, Qty: 3 (ItemType: "Gaveta").
+       - Portas (Três): W: 480 (ou 470), H: 700, D: 18, Qty: 3 (ItemType: "Porta").
+     * Exemplo (Armário Escritório/Quarto):
+       - Caixa Lateral/Torre: W: 250 (ou similar), H: 2390, D: 500.
+       - Aéreo Ponte: W: 1950, H: 1130 (ou altura correspondente), D: 500.
+       - Portas de Giro de Vidro: W: 410, H: 2390, D: 20, Qty: 2.
+
+4. **Identificação de Materiais**:
+   * Localize a legenda de "MATERIAIS" ou as anotações apontadas por setas (ex: MDF Beton - Guararapes, MDF Preto Trama - Duratex, Madeira Natural Cinamomo Polido Fosco, MDF Freijó, MDF Itapuã, Couro Marrom, Espelho Prata). Atribua o material correto correspondente a cada peça extraída.
 
 Retorne APENAS um objeto JSON com a chave "items" contendo um array de objetos nesta estrutura EXATA:
 {
   "items": [
     {
-      "environment": "Nome do Ambiente",
-      "itemType": "Caixa|Porta|Gaveta|Prateleira|Tampo|Rodapé|Fundo|Testeira|Ferragem|Aéreo",
-      "description": "Descrição clara e técnica da peça",
+      "environment": "Nome do Ambiente (ex: Escritório, Quarto, Banheiro Social, etc.)",
+      "itemType": "Caixa|Porta|Gaveta|Prateleira|Tampo|Rodapé|Fundo|Testeira|Ferragem|Aéreo|Painel|Cabeceira|Mesa",
+      "description": "Descrição clara e técnica da peça com acabamento e especificações",
       "width": 0,
       "height": 0,
       "depth": 0,
       "thickness": 18,
       "quantity": 1,
-      "materialType": "Tipo de material com espessura"
+      "materialType": "Nome do material extraído da legenda/chamada"
     }
   ]
 }
 
-NÃO invente dados. Extraia APENAS o que está visível no projeto. Se uma dimensão não estiver clara, use 0.
+NÃO invente dados. Extraia APENAS o que está documentado nas cotas e descrições do PDF. Se uma dimensão não estiver clara, use 0.
 NÃO inclua markdown, backticks ou texto explicativo — retorne SOMENTE o JSON puro.`;
 
     // Build user message content
