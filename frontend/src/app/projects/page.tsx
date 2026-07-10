@@ -296,102 +296,246 @@ export default function Projects() {
     let envOffset = 0;
 
     Object.entries(envGroups).forEach(([env, envItems]) => {
-      // Find cabinets
-      const boxes = envItems.filter((i) => i.itemType.toLowerCase().includes("caixa") || i.itemType.toLowerCase().includes("roupeiro") || i.itemType.toLowerCase().includes("aéreo") || i.itemType.toLowerCase().includes("armário"));
-      const details = envItems.filter((i) => !i.itemType.toLowerCase().includes("caixa") && !i.itemType.toLowerCase().includes("roupeiro") && !i.itemType.toLowerCase().includes("aéreo") && !i.itemType.toLowerCase().includes("armário") && !i.itemType.toLowerCase().includes("ferragem"));
-      
+      // 1. Classify cabinets (base objects)
+      const cabinets = envItems.filter((i) => {
+        const itemType = (i.itemType || "").toLowerCase();
+        const desc = (i.description || "").toLowerCase();
+        return itemType.includes("caixa") || itemType.includes("aéreo") || itemType.includes("armário") || itemType.includes("roupeiro") || itemType.includes("módulo") ||
+               desc.includes("armário") || desc.includes("gabinete") || desc.includes("balcão") || desc.includes("roupeiro") || desc.includes("guarda-roupa") || desc.includes("aéreo");
+      });
+
+      // 2. Classify other structural objects
+      const mesas = envItems.filter((i) => {
+        const itemType = (i.itemType || "").toLowerCase();
+        const desc = (i.description || "").toLowerCase();
+        return itemType.includes("mesa") || itemType.includes("bancada") || desc.includes("mesa") || desc.includes("bancada") || desc.includes("escrivaninha");
+      });
+
+      const cabeceiras = envItems.filter((i) => {
+        const itemType = (i.itemType || "").toLowerCase();
+        const desc = (i.description || "").toLowerCase();
+        return itemType.includes("cabeceira") || desc.includes("cabeceira");
+      });
+
+      const paineis = envItems.filter((i) => {
+        const itemType = (i.itemType || "").toLowerCase();
+        const desc = (i.description || "").toLowerCase();
+        return (itemType.includes("painel") || desc.includes("painel")) && (i.width || 0) > 200 && (i.height || 0) > 200;
+      });
+
+      // 3. Classify sub-parts
+      const subParts = envItems.filter((i) => {
+        const itemType = (i.itemType || "").toLowerCase();
+        const desc = (i.description || "").toLowerCase();
+        const isHardware = itemType.includes("ferragem") || desc.includes("ferragem");
+        if (isHardware) return false;
+        
+        const isDoor = itemType.includes("porta") || desc.includes("porta") || desc.includes("frente");
+        const isDrawer = itemType.includes("gaveta") || desc.includes("gaveta");
+        const isShelf = itemType.includes("prateleira") || desc.includes("prateleira") || desc.includes("divisória");
+        return isDoor || isDrawer || isShelf;
+      });
+
+      // 4. Collect other standalone items
+      const otherBaseObjects = envItems.filter((i) => {
+        const itemType = (i.itemType || "").toLowerCase();
+        const desc = (i.description || "").toLowerCase();
+        if (itemType.includes("ferragem") || desc.includes("ferragem")) return false;
+        
+        const isCab = cabinets.includes(i);
+        const isMesa = mesas.includes(i);
+        const isCabec = cabeceiras.includes(i);
+        const isPainel = paineis.includes(i);
+        const isSub = subParts.includes(i);
+        
+        return !isCab && !isMesa && !isCabec && !isPainel && !isSub && (i.width || 0) > 100 && (i.height || 0) > 100;
+      });
+
+      // 5. Build base objects array
+      const baseObjects: any[] = [];
+      cabinets.forEach((c) => baseObjects.push({ ...c, baseType: "cabinet", subParts: [] }));
+      mesas.forEach((m) => baseObjects.push({ ...m, baseType: "table" }));
+      cabeceiras.forEach((cb) => baseObjects.push({ ...cb, baseType: "headboard" }));
+      paineis.forEach((p) => baseObjects.push({ ...p, baseType: "panel" }));
+      otherBaseObjects.forEach((o) => baseObjects.push({ ...o, baseType: "other" }));
+
+      // 6. Associate sub-parts to parent cabinets
+      subParts.forEach((sub) => {
+        let bestCab: any = null;
+        let bestScore = -999999;
+        const candidateCabs = baseObjects.filter((b) => b.baseType === "cabinet");
+
+        candidateCabs.forEach((cab) => {
+          const hDiff = Math.abs((cab.height || 0) - (sub.height || 0));
+          
+          let wDiff = Math.abs((cab.width || 0) - (sub.width || 0));
+          wDiff = Math.min(wDiff, Math.abs(((cab.width || 0) / 2) - (sub.width || 0)));
+          wDiff = Math.min(wDiff, Math.abs(((cab.width || 0) / 3) - (sub.width || 0)));
+          wDiff = Math.min(wDiff, Math.abs(((cab.width || 0) / 4) - (sub.width || 0)));
+
+          let score = 10000 - hDiff * 2 - wDiff;
+
+          const cabDesc = (cab.description || "").toLowerCase();
+          const subDesc = (sub.description || "").toLowerCase();
+          
+          if (cabDesc.includes("aéreo") && subDesc.includes("aéreo")) score += 2000;
+          if (cabDesc.includes("inferior") && subDesc.includes("inferior")) score += 2000;
+          if (cabDesc.includes("gaveta") && subDesc.includes("gaveta")) score += 1000;
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestCab = cab;
+          }
+        });
+
+        if (bestCab && bestScore > 0) {
+          bestCab.subParts.push(sub);
+        } else {
+          baseObjects.push({
+            ...sub,
+            baseType: "standalone_sub",
+            subParts: []
+          });
+        }
+      });
+
+      // 7. Render objects with offset layout
       let cabinetX = envOffset;
 
-      boxes.forEach((cabinet) => {
-        const w = cabinet.width || 800;
-        const h = cabinet.height || 800;
-        const d = cabinet.depth || 600;
+      baseObjects.forEach((obj) => {
+        const w = obj.width || 800;
+        const h = obj.height || 800;
+        const d = obj.depth || 600;
 
         const cx = cabinetX + w / 2;
         const cy = h / 2;
         const cz = d / 2;
 
-        // Base box color (Warm wood tone or style)
-        let boxColor = "#4b3525"; // standard wood
+        let baseColor = "#4b3525"; // standard wood
         if (viewStyle === "solid") {
-          boxColor = "#0d9488"; // sleek teal
+          baseColor = "#0d9488"; // teal
         } else if (viewStyle === "wireframe") {
-          boxColor = "rgba(13, 148, 136, 0.18)";
+          baseColor = "rgba(13, 148, 136, 0.18)";
         }
-        
-        addBoxFaces(list, cx, cy, cz, w, h, d, boxColor, "Caixa", cabinet);
 
-        // Shelves and doors
-        const cabinetDoors = details.filter((i) => i.itemType.toLowerCase().includes("porta") || i.itemType.toLowerCase().includes("frente"));
-        const cabinetShelves = details.filter((i) => i.itemType.toLowerCase().includes("prateleira") || i.itemType.toLowerCase().includes("gaveta") || i.itemType.toLowerCase().includes("tampo"));
+        if (obj.baseType === "cabinet") {
+          // Render hollow box shell
+          addHollowCabinet(list, cx, cy, cz, w, h, d, 18, baseColor, obj);
 
-        cabinetShelves.forEach((shelf, sIdx) => {
-          const sw = shelf.width || (w - 36);
-          const sh = shelf.height || 18;
-          const sd = shelf.depth || (d - 40);
-          
-          const sy = (h / (cabinetShelves.length + 1)) * (sIdx + 1);
-          
-          let shelfColor = "#785840";
-          if (viewStyle === "solid") {
-            shelfColor = "#0f766e";
-          } else if (viewStyle === "wireframe") {
-            shelfColor = "rgba(15, 118, 110, 0.15)";
-          }
+          // Render shelves, drawers, doors
+          const cabinetShelves = obj.subParts.filter((p: any) => (p.itemType || "").toLowerCase().includes("prateleira") || (p.description || "").toLowerCase().includes("prateleira") || (p.description || "").toLowerCase().includes("divisória"));
+          const cabinetDrawers = obj.subParts.filter((p: any) => (p.itemType || "").toLowerCase().includes("gaveta") || (p.description || "").toLowerCase().includes("gaveta"));
+          const cabinetDoors = obj.subParts.filter((p: any) => (p.itemType || "").toLowerCase().includes("porta") || (p.description || "").toLowerCase().includes("porta") || (p.description || "").toLowerCase().includes("frente"));
 
-          addBoxFaces(list, cx, sy, cz - 10, sw, sh, sd, shelfColor, "Prateleira", shelf);
-        });
+          cabinetShelves.forEach((shelf: any, sIdx: number) => {
+            const sw = shelf.width || (w - 36);
+            const sd = shelf.depth || (d - 20);
+            const sy = (h / (cabinetShelves.length + 1)) * (sIdx + 1);
 
-        cabinetDoors.forEach((door, dIdx) => {
-          const dw = door.width || (w / cabinetDoors.length);
-          const dh = door.height || h;
-          const dd = door.depth || 18;
+            let shelfColor = "#785840";
+            if (viewStyle === "solid") shelfColor = "#0f766e";
+            else if (viewStyle === "wireframe") shelfColor = "rgba(15, 118, 110, 0.15)";
 
-          const doorX = cabinetX + (dw / 2) + (dIdx * dw);
-          const doorY = dh / 2;
-          const doorZ = d + dd / 2;
+            addBoxFaces(list, cx, sy, cz, sw, 18, sd, shelfColor, "Prateleira", shelf);
+          });
 
-          let doorColor = "#d4af37"; // gold
-          if (viewStyle === "solid") {
-            doorColor = "#f59e0b"; // sleek amber
-          } else if (viewStyle === "wireframe") {
-            doorColor = "rgba(245, 158, 11, 0.25)";
-          }
+          cabinetDrawers.forEach((drawer: any, dIdx: number) => {
+            const dw = drawer.width || (w - 10);
+            const dh = drawer.height || (h / (cabinetDrawers.length || 1));
+            const dd = drawer.depth || (d - 40);
+            const dyVal = (dh / 2) + (dIdx * dh);
 
-          // Apply door rotation (opening doors)
-          const angle = doorOpenAngle * (Math.PI / 2); // 0 to 90 degrees
-          if (angle > 0) {
-            // Hinge is on the left edge for left door, right edge for right door
-            const isLeftDoor = dIdx === 0;
-            const hingeX = isLeftDoor ? (doorX - dw / 2) : (doorX + dw / 2);
-            const hingeZ = d; // front cabinet surface
-            
-            addBoxFacesWithRotation(list, doorX, doorY, doorZ, dw - 4, dh - 4, dd, doorColor, "Porta", door, hingeX, hingeZ, isLeftDoor ? -angle : angle);
+            const slideOffset = doorOpenAngle * 250;
+            const drawerZ = cz + slideOffset;
+
+            let drawerColor = "#5c4033";
+            if (viewStyle === "solid") drawerColor = "#6366f1";
+            else if (viewStyle === "wireframe") drawerColor = "rgba(99, 102, 241, 0.15)";
+
+            addBoxFaces(list, cx, dyVal, drawerZ + dd / 2, dw - 4, dh - 4, 18, drawerColor, "Frente Gaveta", drawer);
+            addBoxFaces(list, cx, dyVal - 10, drawerZ, dw - 40, dh - 40, dd, "#3e2723", "Gaveta Interna", drawer);
+          });
+
+          cabinetDoors.forEach((door: any, dIdx: number) => {
+            const dw = door.width || (w / (cabinetDoors.length || 1));
+            const dh = door.height || h;
+            const dd = door.depth || 18;
+
+            const doorX = cabinetX + (dw / 2) + (dIdx * dw);
+            const doorY = dh / 2;
+            const doorZ = d + dd / 2;
+
+            let doorColor = "#d4af37";
+            if (viewStyle === "solid") doorColor = "#f59e0b";
+            else if (viewStyle === "wireframe") doorColor = "rgba(245, 158, 11, 0.25)";
+
+            const isSliding = (door.description || "").toLowerCase().includes("correr") || (door.description || "").toLowerCase().includes("desliza") || (door.description || "").toLowerCase().includes("perfil p170");
+            const isBasculante = (door.description || "").toLowerCase().includes("basculante") || (door.description || "").toLowerCase().includes("pistão");
+
+            if (isSliding) {
+              const slideDir = dIdx % 2 === 0 ? 1 : -1;
+              const slideOffset = doorOpenAngle * dw * 0.8 * slideDir;
+              addBoxFaces(list, doorX + slideOffset, doorY, doorZ, dw - 4, dh - 4, dd, doorColor, "Porta de Correr", door);
+            } else if (isBasculante) {
+              const angle = doorOpenAngle * (Math.PI / 2);
+              const hingeY = cy + h / 2;
+              const hingeZ = d;
+              addBoxFacesWithVerticalRotation(list, doorX, doorY, doorZ, dw - 4, dh - 4, dd, doorColor, "Porta Basculante", door, hingeY, hingeZ, -angle);
+            } else {
+              const angle = doorOpenAngle * (Math.PI / 2);
+              const isLeftHinge = dIdx % 2 === 0;
+              const hingeX = isLeftHinge ? (doorX - dw / 2) : (doorX + dw / 2);
+              const hingeZ = d;
+              addBoxFacesWithRotation(list, doorX, doorY, doorZ, dw - 4, dh - 4, dd, doorColor, "Porta Giro", door, hingeX, hingeZ, isLeftHinge ? -angle : angle);
+            }
+          });
+
+        } else if (obj.baseType === "table") {
+          let tableColor = "#855e42";
+          if (viewStyle === "solid") tableColor = "#4f46e5";
+          else if (viewStyle === "wireframe") tableColor = "rgba(79, 70, 229, 0.15)";
+
+          addBoxFaces(list, cx, h - 15, cz, w, 30, d, tableColor, "Tampo Mesa", obj);
+
+          const legW = 40;
+          const legH = h - 30;
+          const legXOffset = w / 2 - 30;
+          const legZOffset = d / 2 - 30;
+
+          addBoxFaces(list, cx - legXOffset, legH / 2, cz - legZOffset, legW, legH, legW, tableColor, "Pé Mesa", obj);
+          addBoxFaces(list, cx + legXOffset, legH / 2, cz - legZOffset, legW, legH, legW, tableColor, "Pé Mesa", obj);
+          addBoxFaces(list, cx - legXOffset, legH / 2, cz + legZOffset, legW, legH, legW, tableColor, "Pé Mesa", obj);
+          addBoxFaces(list, cx + legXOffset, legH / 2, cz + legZOffset, legW, legH, legW, tableColor, "Pé Mesa", obj);
+
+        } else if (obj.baseType === "headboard") {
+          let headColor = "#92400e";
+          if (viewStyle === "solid") headColor = "#b45309";
+          else if (viewStyle === "wireframe") headColor = "rgba(180, 83, 9, 0.15)";
+
+          addBoxFaces(list, cx, cy, cz, w, h, d, headColor, "Cabeceira", obj);
+
+        } else if (obj.baseType === "panel") {
+          let panelColor = "#a16207";
+          if (viewStyle === "solid") panelColor = "#d97706";
+          else if (viewStyle === "wireframe") panelColor = "rgba(217, 119, 6, 0.15)";
+
+          addBoxFaces(list, cx, cy, cz, w, h, d, panelColor, "Painel", obj);
+
+        } else {
+          let otherColor = "#8c6c50";
+          if (viewStyle === "solid") otherColor = "#6366f1";
+          else if (viewStyle === "wireframe") otherColor = "rgba(99, 102, 241, 0.15)";
+
+          if (obj.baseType === "standalone_sub" && ((obj.itemType || "").toLowerCase().includes("porta") || (obj.description || "").toLowerCase().includes("porta"))) {
+            const angle = doorOpenAngle * (Math.PI / 2);
+            addBoxFacesWithRotation(list, cx, cy, cz, w, h, d || 18, otherColor, "Porta Individual", obj, cx - w / 2, cz, -angle);
           } else {
-            addBoxFaces(list, doorX, doorY, doorZ, dw - 4, dh - 4, dd, doorColor, "Porta", door);
+            addBoxFaces(list, cx, cy, cz, w, h, d || 50, otherColor, obj.itemType || "Peça", obj);
           }
-        });
+        }
 
-        cabinetX += w + 300; // spacer
+        cabinetX += w + 350;
       });
-
-      if (boxes.length === 0) {
-        envItems.forEach((item, idx) => {
-          if (item.itemType.toLowerCase().includes("ferragem")) return;
-          const w = item.width || 400;
-          const h = item.height || 400;
-          const d = item.depth || 400;
-          const cx = envOffset + idx * 600 + w / 2;
-          const cy = h / 2;
-          const cz = d / 2;
-          
-          let col = "#8c6c50";
-          if (viewStyle === "solid") col = "#6366f1";
-          else if (viewStyle === "wireframe") col = "rgba(99, 102, 241, 0.2)";
-          
-          addBoxFaces(list, cx, cy, cz, w, h, d, col, item.itemType, item);
-        });
-      }
 
       envOffset += 4000;
     });
@@ -427,12 +571,12 @@ export default function Projects() {
     ];
 
     const faceDefs = [
-      { indices: [0, 1, 2, 3], normal: { x: 0, y: 0, z: -1 }, offset: { x: 0, y: 0, z: -1.2 } }, // Back
-      { indices: [1, 5, 6, 2], normal: { x: 1, y: 0, z: 0 }, offset: { x: 1.2, y: 0, z: 0 } },  // Right
-      { indices: [5, 4, 7, 6], normal: { x: 0, y: 0, z: 1 }, offset: { x: 0, y: 0, z: 1.5 } },  // Front
-      { indices: [4, 0, 3, 7], normal: { x: -1, y: 0, z: 0 }, offset: { x: -1.2, y: 0, z: 0 } }, // Left
-      { indices: [3, 2, 6, 7], normal: { x: 0, y: 1, z: 0 }, offset: { x: 0, y: 1.2, z: 0 } },  // Top
-      { indices: [4, 5, 1, 0], normal: { x: 0, y: -1, z: 0 }, offset: { x: 0, y: -1.2, z: 0 } }  // Bottom
+      { indices: [0, 1, 2, 3], normal: { x: 0, y: 0, z: -1 }, offset: { x: 0, y: 0, z: -1.2 } },
+      { indices: [1, 5, 6, 2], normal: { x: 1, y: 0, z: 0 }, offset: { x: 1.2, y: 0, z: 0 } },
+      { indices: [5, 4, 7, 6], normal: { x: 0, y: 0, z: 1 }, offset: { x: 0, y: 0, z: 1.5 } },
+      { indices: [4, 0, 3, 7], normal: { x: -1, y: 0, z: 0 }, offset: { x: -1.2, y: 0, z: 0 } },
+      { indices: [3, 2, 6, 7], normal: { x: 0, y: 1, z: 0 }, offset: { x: 0, y: 1.2, z: 0 } },
+      { indices: [4, 5, 1, 0], normal: { x: 0, y: -1, z: 0 }, offset: { x: 0, y: -1.2, z: 0 } }
     ];
 
     faceDefs.forEach((fd) => {
@@ -446,6 +590,26 @@ export default function Projects() {
         item
       });
     });
+  }
+
+  function addHollowCabinet(
+    list: Face3D[],
+    cx: number,
+    cy: number,
+    cz: number,
+    w: number,
+    h: number,
+    d: number,
+    thickness: number,
+    color: string,
+    item: any
+  ) {
+    const th = thickness;
+    addBoxFaces(list, cx - w / 2 + th / 2, cy, cz, th, h, d, color, "Lateral Esquerda", item);
+    addBoxFaces(list, cx + w / 2 - th / 2, cy, cz, th, h, d, color, "Lateral Direita", item);
+    addBoxFaces(list, cx, cy - h / 2 + th / 2, cz, w - 2 * th, th, d, color, "Base", item);
+    addBoxFaces(list, cx, cy + h / 2 - th / 2, cz, w - 2 * th, th, d, color, "Tampo Superior", item);
+    addBoxFaces(list, cx, cy, cz - d / 2 + 3, w - 2 * th, h - 2 * th, 6, "#2d2016", "Fundo", item);
   }
 
   function addBoxFacesWithRotation(
@@ -509,6 +673,81 @@ export default function Projects() {
         x: fd.normal.x * Math.cos(angle) - fd.normal.z * Math.sin(angle),
         y: fd.normal.y,
         z: fd.normal.x * Math.sin(angle) + fd.normal.z * Math.cos(angle)
+      };
+
+      list.push({
+        vertices: fd.indices.map((idx) => ({ ...v[idx] })),
+        color,
+        type,
+        normal: rotatedNormal,
+        center: { x: cx, y: cy, z: cz },
+        offset: fd.offset,
+        item
+      });
+    });
+  }
+
+  function addBoxFacesWithVerticalRotation(
+    list: Face3D[],
+    cx: number,
+    cy: number,
+    cz: number,
+    w: number,
+    h: number,
+    d: number,
+    color: string,
+    type: string,
+    item: any,
+    hingeY: number,
+    hingeZ: number,
+    angle: number
+  ) {
+    const dx = w / 2;
+    const dy = h / 2;
+    const dz = d / 2;
+
+    const localV = [
+      { x: -dx, y: -dy, z: -dz },
+      { x: +dx, y: -dy, z: -dz },
+      { x: +dx, y: +dy, z: -dz },
+      { x: -dx, y: +dy, z: -dz },
+      { x: -dx, y: -dy, z: +dz },
+      { x: +dx, y: -dy, z: +dz },
+      { x: +dx, y: +dy, z: +dz },
+      { x: -dx, y: +dy, z: +dz }
+    ];
+
+    const v = localV.map((lv) => {
+      const gy = cy + lv.y;
+      const gz = cz + lv.z;
+      
+      const ry = gy - hingeY;
+      const rz = gz - hingeZ;
+      
+      const rotatedY = hingeY + ry * Math.cos(angle) - rz * Math.sin(angle);
+      const rotatedZ = hingeZ + ry * Math.sin(angle) + rz * Math.cos(angle);
+      
+      return {
+        x: cx + lv.x,
+        y: rotatedY,
+        z: rotatedZ
+      };
+    });
+
+    const faceDefs = [
+      { indices: [0, 1, 2, 3], normal: { x: 0, y: 0, z: -1 }, offset: { x: 0, y: 0, z: -1.2 } },
+      { indices: [1, 5, 6, 2], normal: { x: 1, y: 0, z: 0 }, offset: { x: 1.2, y: 0, z: 0 } },
+      { indices: [5, 4, 7, 6], normal: { x: 0, y: 0, z: 1 }, offset: { x: 0, y: 0, z: 1.5 } },
+      { indices: [4, 0, 3, 7], normal: { x: -1, y: 0, z: 0 }, offset: { x: -1.2, y: 0, z: 0 } },
+      { indices: [3, 2, 6, 7], normal: { x: 0, y: 1, z: 0 }, offset: { x: 0, y: 1.2, z: 0 } },
+      { indices: [4, 5, 1, 0], normal: { x: 0, y: -1, z: 0 }, offset: { x: 0, y: -1.2, z: 0 } }
+    ];
+
+    faceDefs.forEach((fd) => {
+      const rotatedNormal = {
+        x: fd.normal.x,
+        y: fd.normal.y * Math.cos(angle) - fd.normal.z * Math.sin(angle),
+        z: fd.normal.y * Math.sin(angle) + fd.normal.z * Math.cos(angle)
       };
 
       list.push({
