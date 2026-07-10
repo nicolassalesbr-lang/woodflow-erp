@@ -76,14 +76,11 @@ export class ProjectController {
 
     // Base mock items to fall back on
     let parsedItems = [
-      // Cozinha
       { environment: 'Cozinha', itemType: 'Caixa', description: 'Gabinete inferior pia', width: 1200, height: 800, depth: 600, thickness: 18, quantity: 1, materialType: 'MDF Branco TX 18mm' },
       { environment: 'Cozinha', itemType: 'Porta', description: 'Porta basculante perfil alumínio', width: 600, height: 400, depth: 20, thickness: 18, quantity: 2, materialType: 'Vidro Reflecta Bronze' },
       { environment: 'Cozinha', itemType: 'Prateleira', description: 'Prateleira interna organizadora', width: 1164, height: 550, depth: 15, thickness: 15, quantity: 2, materialType: 'MDF Branco TX 15mm' },
       { environment: 'Cozinha', itemType: 'Ferragem', description: 'Dobradiça amortecedor clip 35mm', width: 35, height: 35, depth: 50, thickness: 0, quantity: 4, materialType: 'Dobradiça amortecedor 35mm' },
       { environment: 'Cozinha', itemType: 'Ferragem', description: 'Pistão a gás 80N para basculante', width: 0, height: 0, depth: 0, thickness: 0, quantity: 2, materialType: 'Pistão Gás' },
-      
-      // Quarto / Closet
       { environment: 'Quarto', itemType: 'Caixa', description: 'Módulo principal roupeiro 2 portas', width: 2200, height: 2600, depth: 650, thickness: 18, quantity: 1, materialType: 'MDF Louro Freijó 18mm' },
       { environment: 'Quarto', itemType: 'Porta', description: 'Porta de correr amadeirada', width: 1100, height: 2500, depth: 20, thickness: 18, quantity: 2, materialType: 'MDF Louro Freijó 18mm' },
       { environment: 'Quarto', itemType: 'Gaveta', description: 'Frente de gaveta com puxador cava', width: 500, height: 180, depth: 500, thickness: 15, quantity: 4, materialType: 'MDF Louro Freijó 15mm' },
@@ -94,74 +91,168 @@ export class ProjectController {
     const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
     const deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4o';
 
-    if (apiKey && endpoint && fileBase64 && mimeType) {
-      try {
-        const cleanEndpoint = endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint;
-        const url = `${cleanEndpoint}/openai/deployments/${deploymentName}/chat/completions?api-version=2024-02-15-preview`;
-        
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'api-key': apiKey,
-          },
-          body: JSON.stringify({
-            messages: [
-              {
-                role: 'system',
-                content: `Você é um assistente especialista em marcenaria e engenharia de produção de móveis planejados.
-Sua tarefa é analisar a planta baixa, tabela de corte, desenho técnico ou documento de projeto enviado e extrair a lista completa de peças e ferragens para fabricação.
+    const docIntelKey = process.env.AZURE_AI_DOC_INTEL_KEY;
+    const docIntelEndpoint = process.env.AZURE_AI_DOC_INTEL_ENDPOINT;
 
-Você deve responder APENAS com um array JSON válido. Não inclua nenhuma explicação, markdown ou tags html (como \`\`\`json). O retorno deve ser exclusivamente um array de objetos onde cada objeto segue a estrutura:
+    let isRealParsing = false;
+
+    if (fileBase64 && mimeType) {
+      const buffer = Buffer.from(fileBase64, 'base64');
+      let extractedContent = '';
+      let isPdf = mimeType === 'application/pdf' || filename?.toLowerCase().endsWith('.pdf');
+
+      try {
+        // TIER 1: Azure Document Intelligence (Layout/OCR Analysis)
+        if (docIntelKey && docIntelEndpoint) {
+          const cleanDocIntelEndpoint = docIntelEndpoint.endsWith('/') ? docIntelEndpoint.slice(0, -1) : docIntelEndpoint;
+          const docIntelUrl = `${cleanDocIntelEndpoint}/documentintelligence/documentModels/prebuilt-layout:analyze?api-version=2024-11-30`;
+          
+          console.log('[AI Reader] Sending file to Azure Document Intelligence...');
+          const docIntelResponse = await fetch(docIntelUrl, {
+            method: 'POST',
+            headers: {
+              'Ocp-Apim-Subscription-Key': docIntelKey,
+              'Content-Type': 'application/octet-stream',
+            },
+            body: buffer,
+          });
+
+          if (docIntelResponse.status === 202) {
+            const operationLocation = docIntelResponse.headers.get('operation-location');
+            if (operationLocation) {
+              console.log('[AI Reader] Waiting for Document Intelligence layout analysis...');
+              let succeeded = false;
+              // Poll for analysis completion (max 20 seconds)
+              for (let i = 0; i < 20; i++) {
+                await new Promise((resolve) => setTimeout(resolve, 1000));
+                const pollRes = await fetch(operationLocation, {
+                  headers: { 'Ocp-Apim-Subscription-Key': docIntelKey },
+                });
+                if (pollRes.ok) {
+                  const pollData = await pollRes.json();
+                  if (pollData.status === 'succeeded') {
+                    succeeded = true;
+                    const result = pollData.analyzeResult;
+                    extractedContent = result.content || '';
+                    
+                    // Format extracted tables as markdown to assist GPT-4o with precise columns
+                    if (result.tables && result.tables.length > 0) {
+                      extractedContent += '\n\n=== TABELAS EXTRAÍDAS DO DOCUMENTO ===\n';
+                      for (const table of result.tables) {
+                        const rows = Array.from({ length: table.rowCount }, () => Array(table.columnCount).fill(''));
+                        for (const cell of table.cells) {
+                          rows[cell.rowIndex][cell.columnIndex] = cell.content;
+                        }
+                        extractedContent += rows.map((r) => `| ${r.join(' | ')} |`).join('\n') + '\n\n';
+                      }
+                    }
+                    console.log('[AI Reader] Document Intelligence analysis succeeded.');
+                    break;
+                  } else if (pollData.status === 'failed') {
+                    console.error('[AI Reader] Document Intelligence analysis failed:', pollData.error);
+                    break;
+                  }
+                }
+              }
+            }
+          } else {
+            console.error('[AI Reader] Document Intelligence rejected request:', docIntelResponse.status, await docIntelResponse.text());
+          }
+        }
+
+        // TIER 2: Local PDF-Parse (for vector PDFs) if Document Intelligence is not configured
+        if (!extractedContent && isPdf) {
+          console.log('[AI Reader] Local fallback: parsing vector PDF text...');
+          const pdf = require('pdf-parse');
+          const pdfData = await pdf(buffer);
+          extractedContent = pdfData.text || '';
+          console.log(`[AI Reader] Local PDF parsing completed. Extracted ${extractedContent.length} characters.`);
+        }
+
+        // TIER 3: Call Azure OpenAI (GPT-4o) with either extracted text or direct image vision
+        if (apiKey && endpoint) {
+          const cleanEndpoint = endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint;
+          const openaiUrl = `${cleanEndpoint}/openai/deployments/${deploymentName}/chat/completions?api-version=2024-02-15-preview`;
+          
+          let messages = [];
+
+          const systemPrompt = `Você é um assistente especialista em marcenaria de alto padrão e engenharia de móveis sob medida.
+Sua tarefa é analisar o documento técnico enviado (planta, memorial descritivo, tabela de corte ou lista de peças) e extrair todas as peças, módulos, portas e ferragens para fabricação.
+
+Você deve retornar APENAS um array JSON válido de objetos com a seguinte estrutura:
 {
-  "environment": string (ex: "Cozinha", "Quarto", "Closet"),
+  "environment": string (ex: "Cozinha", "Dormitório", "Banheiro"),
   "itemType": string (ex: "Caixa", "Porta", "Gaveta", "Prateleira", "Ferragem"),
-  "description": string (breve descrição da peça, ex: "Frente de gaveta com puxador cava"),
-  "width": number (largura em mm),
-  "height": number (altura em mm),
-  "depth": number (profundidade em mm),
-  "thickness": number (espessura em mm, ex: 15, 18, 6),
-  "quantity": number (quantidade de peças),
-  "materialType": string (ex: "MDF Branco TX 18mm", "MDF Louro Freijó 15mm", "Dobradiça 35mm")
-}`
-              },
+  "description": string (ex: "Gabinete inferior pia com portas", "Frente de gaveta com puxador cava"),
+  "width": number (largura em milímetros ou 0 se irrelevante),
+  "height": number (altura em milímetros ou 0 se irrelevante),
+  "depth": number (profundidade em milímetros ou 0 se irrelevante),
+  "thickness": number (espessura do MDF, ex: 6, 15, 18 ou 0 se ferragem),
+  "quantity": number (quantidade de unidades),
+  "materialType": string (ex: "MDF Branco TX 18mm", "MDF Louro Freijó 15mm", "Dobradiça amortecedor 35mm")
+}
+Responda APENAS com o JSON puramente (não inclua tags markdown ou blocos de código \`\`\`json).`;
+
+          if (extractedContent) {
+            // Text-based GPT-4o completions
+            messages = [
+              { role: 'system', content: systemPrompt },
+              {
+                role: 'user',
+                content: `Aqui está o conteúdo textual e tabelas extraídos do documento do projeto de marcenaria:\n\n${extractedContent}\n\nPor favor, filtre e estruture esses dados na lista de peças JSON.`
+              }
+            ];
+          } else if (!isPdf) {
+            // Direct GPT-4o vision completions for image uploads
+            messages = [
+              { role: 'system', content: systemPrompt },
               {
                 role: 'user',
                 content: [
-                  {
-                    type: 'text',
-                    content: 'Por favor, analise este documento de marcenaria e extraia as peças em formato JSON conforme as instruções.'
-                  },
-                  {
-                    type: 'image_url',
-                    image_url: {
-                      url: `data:${mimeType};base64,${fileBase64}`
-                    }
-                  }
+                  { type: 'text', content: 'Analise visualmente esta planta ou imagem técnica de marcenaria e extraia as peças em formato JSON.' },
+                  { type: 'image_url', image_url: { url: `data:${mimeType};base64,${fileBase64}` } }
                 ]
               }
-            ],
-            max_tokens: 4000,
-            temperature: 0,
-            response_format: { type: 'json_object' }
-          })
-        });
+            ];
+          }
 
-        if (response.ok) {
-          const resData = await response.json();
-          const content = resData.choices[0]?.message?.content;
-          if (content) {
-            let extracted = JSON.parse(content.trim());
-            if (extracted && !Array.isArray(extracted) && extracted.items) {
-              extracted = extracted.items;
-            }
-            if (Array.isArray(extracted)) {
-              parsedItems = extracted;
+          if (messages.length > 0) {
+            console.log('[AI Reader] Invoking Azure OpenAI completion...');
+            const response = await fetch(openaiUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'api-key': apiKey,
+              },
+              body: JSON.stringify({
+                messages,
+                max_tokens: 4000,
+                temperature: 0,
+                response_format: { type: 'json_object' }
+              }),
+            });
+
+            if (response.ok) {
+              const resData = await response.json();
+              const content = resData.choices[0]?.message?.content;
+              if (content) {
+                let extracted = JSON.parse(content.trim());
+                if (extracted && !Array.isArray(extracted) && extracted.items) {
+                  extracted = extracted.items;
+                }
+                if (Array.isArray(extracted)) {
+                  parsedItems = extracted;
+                  isRealParsing = true;
+                  console.log(`[AI Reader] Successfully parsed ${parsedItems.length} items from AI.`);
+                }
+              }
+            } else {
+              console.error('[AI Reader] OpenAI request failed:', response.status, await response.text());
             }
           }
         }
-      } catch (error) {
-        console.error('Error invoking Azure OpenAI endpoint:', error);
+      } catch (err) {
+        console.error('[AI Reader] Error during document analysis:', err);
       }
     }
 
@@ -170,7 +261,15 @@ Você deve responder APENAS com um array JSON válido. Não inclua nenhuma expli
       const createdItem = await this.prisma.projectItem.create({
         data: {
           projectId: id,
-          ...item,
+          environment: item.environment || 'Cozinha',
+          itemType: item.itemType || 'Caixa',
+          description: item.description || 'Peça estrutural',
+          width: Number(item.width) || 0,
+          height: Number(item.height) || 0,
+          depth: Number(item.depth) || 0,
+          thickness: Number(item.thickness) || 0,
+          quantity: Number(item.quantity) || 1,
+          materialType: item.materialType || 'MDF Branco TX 18mm',
         },
       });
       items.push(createdItem);
@@ -182,14 +281,16 @@ Você deve responder APENAS com um array JSON válido. Não inclua nenhuma expli
       data: { originalFileUrl: filename || 'planta_baixa.pdf' },
     });
 
+    const uniqueEnvironments = Array.from(new Set(items.map((i) => i.environment)));
+
     // Write timeline update to Lead if linked
     if (project.leadId) {
       await this.prisma.leadTimeline.create({
         data: {
           leadId: project.leadId,
           type: 'SYSTEM',
-          content: `AI de Leitura de Projetos analisou o arquivo "${filename || 'planta_baixa.pdf'}" e identificou 2 ambientes (Cozinha, Quarto), totalizando ${items.length} itens (portas, MDF, ferragens).`,
-          author: 'AI Reader',
+          content: `${isRealParsing ? 'Copiloto de IA Real' : 'Simulador de IA'} analisou o arquivo "${filename || 'planta_baixa.pdf'}", identificou os ambientes (${uniqueEnvironments.join(', ')}), extraindo ${items.length} itens com medidas técnicas reais de produção.`,
+          author: isRealParsing ? 'Azure AI Reader' : 'Simulated AI Reader',
         },
       });
     }
@@ -197,8 +298,9 @@ Você deve responder APENAS com um array JSON válido. Não inclua nenhuma expli
     return {
       success: true,
       itemsParsedCount: items.length,
-      environments: ['Cozinha', 'Quarto'],
+      environments: uniqueEnvironments,
       items,
+      isReal: isRealParsing,
     };
   }
 }
