@@ -116,6 +116,9 @@ model Project {
   tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   leadId          String?
   lead            Lead?         @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  parseStatus     String?       @default("IDLE") // IDLE, QUEUE, EXTRACTING, INTERPRETING, VALIDATING, COMPLETED, FAILED
+  parseError      String?
+  parseProgress   Int           @default(0)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
@@ -137,6 +140,15 @@ model ProjectItem {
   thickness    Float    // em mm
   quantity     Int
   materialType String   // e.g., "MDF Branco Tx 18mm", "Dobradiça com amortecedor"
+  sentidoFibra String?
+  fitaBorda    String?
+  codigo       String?
+  area         Float?
+  volume       Float?
+  observacoes  String?
+  acabamento   String?
+  cor          String?
+  fornecedor   String?
   createdAt    DateTime @default(now())
 }
 
@@ -189,4 +201,13 @@ model ProductionTask {
   completedAt DateTime?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
+}
+
+model ProjectCorrection {
+  id             String   @id @default(uuid())
+  tenantId       String
+  fieldType      String   // e.g. "materialType", "itemType", "environment"
+  originalValue  String
+  correctedValue String
+  createdAt      DateTime @default(now())
 }
