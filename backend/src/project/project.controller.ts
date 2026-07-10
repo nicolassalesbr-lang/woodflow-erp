@@ -68,8 +68,8 @@ export class ProjectController {
     fs.writeFileSync(pdfPath, pdfBuffer);
 
     try {
-      // Convert PDF to PNG images at 200 DPI (good balance between quality and size)
-      execSync(`pdftoppm -png -r 200 "${pdfPath}" "${path.join(tmpDir, 'page')}"`, {
+      // Convert PDF to PNG images at 120 DPI (good balance between quality and size, prevents payload limits)
+      execSync(`pdftoppm -png -r 120 "${pdfPath}" "${path.join(tmpDir, 'page')}"`, {
         timeout: 30000,
       });
 
@@ -173,39 +173,48 @@ Retorne APENAS um objeto JSON com a chave "items" contendo um array de objetos n
 NÃO invente dados. Extraia APENAS o que está visível no projeto. Se uma dimensão não estiver clara, use 0.
 NÃO inclua markdown, backticks ou texto explicativo — retorne SOMENTE o JSON puro.`;
 
-    // Build user message content with images and optional text
-    const userContent: any[] = [];
+    // Build user message content
+    let userMessageContent: any;
 
-    userContent.push({
-      type: 'text',
-      text: `Analise este projeto executivo de marcenaria com ${imageBase64Array.length} página(s). Extraia TODAS as peças de TODOS os ambientes com suas medidas reais para fabricação.${
-        extractedText
-          ? `\n\nTexto extraído do documento para referência adicional:\n${extractedText.substring(0, 8000)}`
-          : ''
-      }`,
-    });
-
-    // Add each page image (limit to first 8 pages to stay within token limits)
-    const maxPages = Math.min(imageBase64Array.length, 8);
-    for (let i = 0; i < maxPages; i++) {
-      userContent.push({
-        type: 'image_url',
-        image_url: {
-          url: `data:image/png;base64,${imageBase64Array[i]}`,
-          detail: 'high',
-        },
+    if (imageBase64Array.length === 0) {
+      // Text-only completion
+      userMessageContent = `Analise este projeto executivo de marcenaria. Extraia TODAS as peças de TODOS os ambientes com suas medidas reais para fabricação.\n\nTexto extraído do documento:\n${extractedText.substring(0, 12000)}`;
+    } else {
+      // Multimodal image + text completion
+      const contentParts: any[] = [];
+      contentParts.push({
+        type: 'text',
+        text: `Analise este projeto executivo de marcenaria com ${imageBase64Array.length} página(s). Extraia TODAS as peças de TODOS os ambientes com suas medidas reais para fabricação.${
+          extractedText
+            ? `\n\nTexto extraído do documento para referência adicional:\n${extractedText.substring(0, 8000)}`
+            : ''
+        }`,
       });
+
+      // Add page images (limit to first 8 pages)
+      const maxPages = Math.min(imageBase64Array.length, 8);
+      for (let i = 0; i < maxPages; i++) {
+        contentParts.push({
+          type: 'image_url',
+          image_url: {
+            url: `data:image/png;base64,${imageBase64Array[i]}`,
+            detail: 'high',
+          },
+        });
+      }
+      userMessageContent = contentParts;
     }
 
     const messages = [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: userContent },
+      { role: 'user', content: userMessageContent },
     ];
 
     const requestBody: any = {
       messages,
-      max_tokens: 16000,
+      max_tokens: 4096,
       temperature: 0,
+      response_format: { type: 'json_object' }
     };
 
     // Only use model param for standard OpenAI (Azure uses deployment name in URL)
@@ -213,7 +222,7 @@ NÃO inclua markdown, backticks ou texto explicativo — retorne SOMENTE o JSON 
       requestBody.model = model;
     }
 
-    console.log(`[AI Reader] Sending ${maxPages} page image(s) to GPT-4o Vision...`);
+    console.log(`[AI Reader] Sending request to GPT-4o with ${imageBase64Array.length} images...`);
 
     const response = await fetch(apiUrl, {
       method: 'POST',
@@ -322,13 +331,24 @@ NÃO inclua markdown, backticks ou texto explicativo — retorne SOMENTE o JSON 
         if (isPdf) {
           try {
             const pdfModule = require('pdf-parse');
-            const pdfParser = typeof pdfModule === 'function' ? pdfModule : (pdfModule.default || pdfModule);
-            if (typeof pdfParser === 'function') {
-              const pdfData = await pdfParser(buffer);
+            const PDFParseClass = pdfModule.PDFParse;
+            if (typeof PDFParseClass === 'function') {
+              // Custom class in this project requires Uint8Array rather than Buffer
+              const uint8 = new Uint8Array(buffer);
+              const parser = new PDFParseClass(uint8);
+              const pdfData = await parser.getText();
               extractedText = pdfData.text || '';
-              console.log(`[AI Reader] PDF text extraction: ${extractedText.length} chars.`);
+              console.log(`[AI Reader] PDF text extraction (Custom PDFParse): ${extractedText.length} chars.`);
             } else {
-              console.warn('[AI Reader] pdf-parse module has unexpected export shape:', typeof pdfParser);
+              // Standard pdf-parse function export
+              const pdfParser = typeof pdfModule === 'function' ? pdfModule : (pdfModule.default || pdfModule);
+              if (typeof pdfParser === 'function') {
+                const pdfData = await pdfParser(buffer);
+                extractedText = pdfData.text || '';
+                console.log(`[AI Reader] PDF text extraction (Standard pdf-parse): ${extractedText.length} chars.`);
+              } else {
+                console.warn('[AI Reader] pdf-parse module has unexpected export shape:', typeof pdfModule);
+              }
             }
           } catch (pdfErr) {
             console.warn('[AI Reader] pdf-parse failed:', pdfErr);
