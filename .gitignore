@@ -33,3 +33,10 @@ woodflow_db.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Credenciais hardcoded — NUNCA versionar (contem hash da senha de login)
+frontend/src/app/api/login/route.ts
+
+# Notas internas de trabalho (nao fazem parte do app)
+SHARED_MEMORY.md
+SHARED_MEMORY_VPS.md
