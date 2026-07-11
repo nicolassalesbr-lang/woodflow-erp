@@ -351,16 +351,16 @@ Extraia APENAS o que está documentado nesta prancha. Não invente peças de out
 
     const requestBody: any = {
       messages,
-      response_format: { type: 'json_object' },
     };
     if (cfg.model) requestBody.model = cfg.model;
 
     if (isNewModel) {
       requestBody.max_completion_tokens = maxTokens;
-      // Novos modelos (como gpt-5/o1/o3) não suportam temperatura customizada (apenas o default 1.0)
+      // Novos modelos (como gpt-5/o1/o3) não suportam temperatura customizada e costumam retornar vazio se response_format json_object for forçado
     } else {
       requestBody.max_tokens = maxTokens;
       requestBody.temperature = 0;
+      requestBody.response_format = { type: 'json_object' };
     }
 
     try {
