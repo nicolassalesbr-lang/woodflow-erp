@@ -523,6 +523,77 @@ Extraia APENAS o que está documentado nas cotas e chamadas desta folha. Não in
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  //  FASE SEMÂNTICA — DIGITAL TWIN (Ambiente → Móveis → Componentes → Ferragens)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /** System prompt do montador semântico: transforma peças planas em um modelo paramétrico. */
+  private buildTwinPrompt(): string {
+    return `Você é um Engenheiro de IA especialista em CAD/BIM, modelagem paramétrica e marcenaria sob medida.
+
+Recebe a LISTA DE PEÇAS já extraídas de um projeto executivo (agrupadas por ambiente). Sua tarefa NÃO é copiar a lista: é RECONSTRUIR SEMANTICAMENTE o projeto como um MODELO PARAMÉTRICO ("Digital Twin"), agrupando as peças em MÓVEIS coesos e detalhando os COMPONENTES de cada móvel.
+
+RACIOCÍNIO OBRIGATÓRIO:
+1. AGRUPE as peças de cada ambiente em MÓVEIS reais (ex.: um "Guarda-roupa", um "Gabinete Inferior", um "Painel de TV", uma "Cama", uma "Bancada com cuba"). Uma "Caixa/Estrutura" + suas portas/gavetas/prateleiras formam UM móvel.
+2. Classifique o TIPO de cada móvel: guarda_roupa | armario_inferior | aereo | estante | painel | cama | bancada | cabeceira | nicho | mesa | balcao.
+3. Para cada móvel, liste os COMPONENTES individualmente com o tipo semântico correto: porta (opening: giro_esquerda|giro_direita|correr|basculante|tombar), gaveta, gavetao, prateleira, cabideiro, tampo, cuba, pia, rodape, rodateto, saia, lateral, fundo, divisoria, nicho, ripado, perfil, vidro, espelho, metalon, led, painel.
+4. Infira FERRAGENS por componente: porta de giro → dobradica; porta de correr → trilho/roldana; gaveta → corredica; portas/gavetas → puxador (perfil/fecho_toque/comum). Vidro/espelho → não é MDF.
+5. Defina POSIÇÃO relativa de cada móvel no ambiente (x,y,z em mm; y=0 é o chão; móveis lado a lado incrementam x). Bancadas ficam ~850mm do chão; aéreos ~1500mm.
+6. AUDITORIA (liste em audit.warnings o que estiver faltando): toda porta tem dobradiça/trilho? toda gaveta tem corrediça? toda bancada tem suporte/metalon? todo MDF tem espessura? toda cuba tem posição? Dimensões respeitam o módulo pai?
+
+Retorne SOMENTE JSON puro (sem markdown) neste formato EXATO:
+{
+  "environments": [
+    {
+      "name": "string",
+      "furnitures": [
+        {
+          "id": "slug_curto",
+          "name": "Nome do móvel",
+          "type": "guarda_roupa|armario_inferior|aereo|estante|painel|cama|bancada|cabeceira|nicho|mesa|balcao",
+          "dimensions": { "width": 0, "height": 0, "depth": 0 },
+          "position": { "x": 0, "y": 0, "z": 0 },
+          "rotation": { "y": 0 },
+          "material": "material principal", "color": "", "finish": "",
+          "components": [
+            { "type": "porta", "opening": "giro_esquerda", "width": 0, "height": 0, "depth": 18, "qty": 1, "material": "", "hardware": ["dobradica","puxador_perfil"], "notes": "" }
+          ],
+          "notes": ""
+        }
+      ]
+    }
+  ],
+  "audit": { "warnings": [], "stats": { "environments": 0, "furnitures": 0, "components": 0 } }
+}
+
+Use milímetros. Não invente móveis que não têm peças. Preserve as medidas reais das peças recebidas.`;
+  }
+
+  /** Monta o Digital Twin a partir das peças agrupadas por ambiente (1 chamada LLM). */
+  private async assembleDigitalTwin(cfg: VisionConfig, itemsByEnv: Record<string, any[]>): Promise<any | null> {
+    const payload = JSON.stringify(itemsByEnv);
+    const messages = [
+      { role: 'system', content: this.buildTwinPrompt() },
+      { role: 'user', content: `PEÇAS EXTRAÍDAS (por ambiente):\n${payload.slice(0, 30000)}\n\nReconstrua o Digital Twin paramétrico completo.` },
+    ];
+    const content = await this.callVision(cfg, messages, 12000);
+    if (!content) return null;
+    try {
+      let clean = content.trim();
+      if (clean.startsWith('```json')) clean = clean.slice(7);
+      if (clean.startsWith('```')) clean = clean.slice(3);
+      if (clean.endsWith('```')) clean = clean.slice(0, -3);
+      const twin = JSON.parse(clean.trim());
+      const envs = twin.environments?.length || 0;
+      const furns = (twin.environments || []).reduce((s: number, e: any) => s + (e.furnitures?.length || 0), 0);
+      console.log(`[Twin] Digital Twin montado: ${envs} ambiente(s), ${furns} móvel(is).`);
+      return twin;
+    } catch (err) {
+      console.warn('[Twin] JSON inválido do montador:', err);
+      return null;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   //  PARSE ENDPOINT
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -678,12 +749,35 @@ Extraia APENAS o que está documentado nas cotas e chamadas desta folha. Não in
 
     const uniqueEnvironments = Array.from(new Set(items.map((i) => i.environment)));
 
+    // FASE SEMÂNTICA: monta o Digital Twin paramétrico a partir das peças salvas.
+    let digitalTwin: any = null;
+    if (!parseError && items.length > 0) {
+      try {
+        const cfgTwin = this.getVisionConfig();
+        if (cfgTwin) {
+          const byEnv: Record<string, any[]> = {};
+          for (const it of items) {
+            (byEnv[it.environment] = byEnv[it.environment] || []).push({
+              itemType: it.itemType, description: it.description, codigo: it.codigo,
+              width: it.width, height: it.height, depth: it.depth, thickness: it.thickness,
+              quantity: it.quantity, materialType: it.materialType, cor: it.cor,
+              acabamento: it.acabamento, observacoes: it.observacoes,
+            });
+          }
+          digitalTwin = await this.assembleDigitalTwin(cfgTwin, byEnv);
+        }
+      } catch (twinErr) {
+        console.warn('[Twin] Falha ao montar Digital Twin:', twinErr);
+      }
+    }
+
     await this.prisma.project.update({
       where: { id },
       data: {
         parseStatus: parseError ? 'FAILED' : 'COMPLETED',
         parseProgress: 100,
         parseError,
+        digitalTwin: digitalTwin ?? undefined,
       },
     });
 
