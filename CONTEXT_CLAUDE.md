@@ -56,8 +56,15 @@ O loop de animação (`requestAnimationFrame`) do canvas **NÃO** deve chamar `s
 - `frontend/src/app/api/login/route.ts` e `SHARED_MEMORY*.md` são gitignored — não versione.
 - Verificação visual local: `getApiUrl` aponta para `localhost:3012`; para testar contra dados reais de produção, o backend tem CORS `*`.
 
+## ⭐ ARQUITETURA: Digital Twin → Three.js (nova)
+Filosofia: **compreender → modelar (Digital Twin paramétrico) → renderizar**. NÃO gerar 3D das linhas do PDF.
+- **Backend** gera `Project.digitalTwin` (Json): `{ environments[] → furnitures[] (type, dimensions, position, rotation, material, components[], notes) + audit }`. Método `assembleDigitalTwin` (1 chamada LLM sobre as peças extraídas). Rodar `npx prisma db push` ao deployar mudança de schema.
+- **Frontend** `frontend/src/app/projects/ThreeViewer.tsx` (three@0.185, `next/dynamic ssr:false`): consome o digitalTwin → cena Three.js com mesh por componente, materiais PBR (vidro/espelho/metal/pedra/LED/MDF), abrir portas/gavetas, explodir, isolar, section plane, export GLB. A aba 3D usa ThreeViewer se houver digitalTwin; senão o canvas antigo.
+- ⚠️ Deploy do frontend agora exige `npm install` na VPS (dep `three`) antes do `npm run build`.
+- Para melhorar a reconstrução, ajuste o prompt de `buildTwinPrompt()` (posições relativas, tipos, ferragens) e/ou os renderizadores em `buildFurniture()` no ThreeViewer.
+
 ## Histórico de commits recentes
 - `fcaecbd` — parser folha-a-folha, DPI 200, prompt limpo, saneamento de dimensões.
-- `e41cae1` — resgate de páginas do frontend que só existiam na VPS para o git; login route gitignored.
-- `be82554` — upgrade completo das 3 abas de Projects (cálculo real).
-- `9a9d394` — detecção de portas (expansão de qty, puxadores, correr/vidro) + fix do loop infinito do 3D.
+- `be82554` — upgrade das 3 abas de Projects (cálculo real).
+- `9a9d394` — detecção de portas + fix do loop do 3D. `eebd3e7` — montagem 3D relativa (Antigravity).
+- `2bf5ea6` — Azure Document Intelligence + retry 429. `aae7316` — Digital Twin (backend). `b2c4698` — renderizador Three.js.
