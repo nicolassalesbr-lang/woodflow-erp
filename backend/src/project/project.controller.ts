@@ -88,13 +88,13 @@ export class ProjectController {
     fs.writeFileSync(pdfPath, pdfBuffer);
 
     try {
-      execSync(`pdftoppm -png -r ${dpi} "${pdfPath}" "${path.join(tmpDir, 'page')}"`, {
+      execSync(`pdftoppm -jpeg -r ${dpi} "${pdfPath}" "${path.join(tmpDir, 'page')}"`, {
         timeout: 120000,
         maxBuffer: 1024 * 1024 * 64,
       });
 
       const imageFiles = fs.readdirSync(tmpDir)
-        .filter(f => f.startsWith('page') && f.endsWith('.png'))
+        .filter(f => f.startsWith('page') && f.endsWith('.jpg'))
         // pdftoppm zero-pads page numbers, so a lexical sort keeps page order
         .sort();
 
@@ -553,7 +553,7 @@ Extraia APENAS o que está documentado nesta prancha. Não invente peças de out
       },
       {
         type: 'image_url',
-        image_url: { url: `data:image/png;base64,${imageBase64}`, detail: 'high' },
+        image_url: { url: `data:image/jpeg;base64,${imageBase64}`, detail: 'high' },
       },
     ];
 
