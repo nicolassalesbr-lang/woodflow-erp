@@ -12,7 +12,7 @@ import { execSync } from 'child_process';
  */
 const PAGE_DPI = 200;
 /** How many Vision calls run in parallel (one per sheet). Keeps latency low without tripping rate limits. */
-const VISION_CONCURRENCY = 3;
+const VISION_CONCURRENCY = 1;
 /** Safety cap so a monster PDF never explodes cost/latency. */
 const MAX_PAGES = 40;
 
@@ -127,6 +127,17 @@ export class ProjectController {
     const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
     const model = process.env.OPENAI_MODEL || 'gpt-4o';
 
+    if (standardKey) {
+      return {
+        apiUrl: 'https://api.openai.com/v1/chat/completions',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${standardKey}`,
+        },
+        model,
+      };
+    }
+
     if (azureKey && azureEndpoint) {
       const cleanEndpoint = azureEndpoint.trim();
 
@@ -159,17 +170,6 @@ export class ProjectController {
           'Content-Type': 'application/json',
           'api-key': azureKey,
         },
-      };
-    }
-
-    if (standardKey) {
-      return {
-        apiUrl: 'https://api.openai.com/v1/chat/completions',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${standardKey}`,
-        },
-        model,
       };
     }
 
