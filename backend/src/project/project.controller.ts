@@ -128,15 +128,37 @@ export class ProjectController {
     const model = process.env.OPENAI_MODEL || 'gpt-4o';
 
     if (azureKey && azureEndpoint) {
-      const cleanEndpoint = azureEndpoint.endsWith('/') ? azureEndpoint.slice(0, -1) : azureEndpoint;
+      const cleanEndpoint = azureEndpoint.trim();
+
+      // Se for a URL do Azure AI Studio/Foundry com gateway compatível com OpenAI
+      if (cleanEndpoint.includes('services.ai.azure.com') || cleanEndpoint.includes('/openai/v1')) {
+        let apiUrl = cleanEndpoint;
+        if (apiUrl.endsWith('/responses')) {
+          apiUrl = apiUrl.replace(/\/responses$/, '/chat/completions');
+        } else if (!apiUrl.endsWith('/chat/completions')) {
+          apiUrl = apiUrl.endsWith('/') ? apiUrl + 'chat/completions' : apiUrl + '/chat/completions';
+        }
+
+        const deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-5';
+        return {
+          apiUrl,
+          headers: {
+            'Content-Type': 'application/json',
+            'api-key': azureKey,
+          },
+          model: deploymentName, // Necessário enviar no body no gateway da Azure AI
+        };
+      }
+
+      // Caso clássico da Azure OpenAI
+      const cleanClassic = cleanEndpoint.endsWith('/') ? cleanEndpoint.slice(0, -1) : cleanEndpoint;
       const deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4o';
       return {
-        apiUrl: `${cleanEndpoint}/openai/deployments/${deploymentName}/chat/completions?api-version=2024-02-15-preview`,
+        apiUrl: `${cleanClassic}/openai/deployments/${deploymentName}/chat/completions?api-version=2024-02-15-preview`,
         headers: {
           'Content-Type': 'application/json',
           'api-key': azureKey,
         },
-        // Azure carries the deployment in the URL, so no model field in the body.
       };
     }
 
@@ -315,20 +337,30 @@ AUDITORIA FINAL (antes de retornar o JSON)
 Extraia APENAS o que está documentado nesta prancha. Não invente peças de outras folhas. Se um móvel não tiver cota visível para uma dimensão, deduza pela proporção do desenho e espessura — mas classifique como "estimada" com confianca baixa.`;
   }
 
-  /** Low-level chat completion call. Retries on 429/503 with backoff. */
   private async callVision(
     cfg: VisionConfig,
     messages: any[],
     maxTokens: number,
     attempt: number = 0,
   ): Promise<string | null> {
+    const isNewModel = cfg.model && (
+      cfg.model.startsWith('gpt-5') ||
+      cfg.model.startsWith('o1') ||
+      cfg.model.startsWith('o3')
+    );
+
     const requestBody: any = {
       messages,
-      max_tokens: maxTokens,
       temperature: 0,
       response_format: { type: 'json_object' },
     };
     if (cfg.model) requestBody.model = cfg.model;
+
+    if (isNewModel) {
+      requestBody.max_completion_tokens = maxTokens;
+    } else {
+      requestBody.max_tokens = maxTokens;
+    }
 
     try {
       const response = await fetch(cfg.apiUrl, {
