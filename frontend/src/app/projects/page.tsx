@@ -84,6 +84,18 @@ function isGlassy(name?: string): boolean {
   const n = (name || "").toLowerCase();
   return ["espelho", "vidro", "reflecta", "fum", "mirror", "glass", "cristal"].some((m) => n.includes(m));
 }
+const HANDLE_COLOR = "#cfc8bb"; // puxador alumínio/perfil
+
+// Classifica o tipo de abertura da porta a partir da descrição
+function classifyDoor(desc: string) {
+  const d = (desc || "").toLowerCase();
+  return {
+    sliding: /correr|desliza|deslizante|perfil\s*p?\s*1?70|s150/.test(d),
+    basculante: /basculante|pist[aã]o|abertura para cima|aramada/.test(d),
+    // sem puxador saliente: tip-on/toque, cava ou perfil embutido (J/tipo perfil)
+    noHandle: /fecho e toque|toque|cava|push|tip.?on|puxador tipo perfil|perfil p\s?11?45/.test(d),
+  };
+}
 
 // ── Decomposição de um móvel em peças planas de corte ─────────────────────────
 interface Panel {
@@ -584,7 +596,12 @@ export default function Projects() {
           // Render shelves, drawers, doors
           const cabinetShelves = obj.subParts.filter((p: any) => (p.itemType || "").toLowerCase().includes("prateleira") || (p.description || "").toLowerCase().includes("prateleira") || (p.description || "").toLowerCase().includes("divisória"));
           const cabinetDrawers = obj.subParts.filter((p: any) => (p.itemType || "").toLowerCase().includes("gaveta") || (p.description || "").toLowerCase().includes("gaveta"));
-          const cabinetDoors = obj.subParts.filter((p: any) => (p.itemType || "").toLowerCase().includes("porta") || (p.description || "").toLowerCase().includes("porta") || (p.description || "").toLowerCase().includes("frente"));
+          const cabinetDoors = obj.subParts.filter((p: any) => {
+            const t = (p.itemType || "").toLowerCase();
+            const d = (p.description || "").toLowerCase();
+            const isDrawer = t.includes("gaveta") || d.includes("gaveta");
+            return !isDrawer && (t.includes("porta") || d.includes("porta"));
+          });
 
           cabinetShelves.forEach((shelf: any, sIdx: number) => {
             const sw = shelf.width || (w - 36);
@@ -598,56 +615,96 @@ export default function Projects() {
             addBoxFaces(list, cx, sy, cz, sw, 18, sd, shelfColor, "Prateleira", shelf);
           });
 
-          cabinetDrawers.forEach((drawer: any, dIdx: number) => {
+          // Expande a quantidade de gavetas em frentes empilhadas
+          const drawerLeaves: any[] = [];
+          cabinetDrawers.forEach((dr: any) => {
+            const q = Math.max(1, Number(dr.quantity) || 1);
+            for (let k = 0; k < q; k++) drawerLeaves.push(dr);
+          });
+          drawerLeaves.forEach((drawer: any, dIdx: number) => {
             const dw = drawer.width || (w - 10);
-            const dh = drawer.height || (h / (cabinetDrawers.length || 1));
+            const dh = drawer.height || (h / (drawerLeaves.length || 1));
             const dd = drawer.depth || (d - 40);
             const dyVal = (dh / 2) + (dIdx * dh);
 
             const slideOffset = doorOpenAngle * 250;
             const drawerZ = cz + slideOffset;
+            const frontZ = drawerZ + dd / 2;
 
             let drawerColor = materialColor(drawer.materialType || obj.materialType);
             if (viewStyle === "solid") drawerColor = "#6366f1";
             else if (viewStyle === "wireframe") drawerColor = "rgba(99, 102, 241, 0.15)";
 
-            addBoxFaces(list, cx, dyVal, drawerZ + dd / 2, dw - 4, dh - 4, 18, drawerColor, "Frente Gaveta", drawer);
+            addBoxFaces(list, cx, dyVal, frontZ, dw - 4, dh - 4, 18, drawerColor, "Frente Gaveta", drawer);
             addBoxFaces(list, cx, dyVal - 10, drawerZ, dw - 40, dh - 40, dd, "#3e2723", "Gaveta Interna", drawer);
-          });
-
-          cabinetDoors.forEach((door: any, dIdx: number) => {
-            const dw = door.width || (w / (cabinetDoors.length || 1));
-            const dh = door.height || h;
-            const dd = door.depth || 18;
-
-            const doorX = cabinetX + (dw / 2) + (dIdx * dw);
-            const doorY = dh / 2;
-            const doorZ = d + dd / 2;
-
-            let doorColor = materialColor(door.materialType || obj.materialType);
-            if (viewStyle === "solid") doorColor = "#f59e0b";
-            else if (viewStyle === "wireframe") doorColor = "rgba(245, 158, 11, 0.25)";
-
-            const isSliding = (door.description || "").toLowerCase().includes("correr") || (door.description || "").toLowerCase().includes("desliza") || (door.description || "").toLowerCase().includes("perfil p170");
-            const isBasculante = (door.description || "").toLowerCase().includes("basculante") || (door.description || "").toLowerCase().includes("pistão");
-
-            if (isSliding) {
-              const slideDir = dIdx % 2 === 0 ? 1 : -1;
-              const slideOffset = doorOpenAngle * dw * 0.8 * slideDir;
-              addBoxFaces(list, doorX + slideOffset, doorY, doorZ, dw - 4, dh - 4, dd, doorColor, "Porta de Correr", door);
-            } else if (isBasculante) {
-              const angle = doorOpenAngle * (Math.PI / 2);
-              const hingeY = cy + h / 2;
-              const hingeZ = d;
-              addBoxFacesWithVerticalRotation(list, doorX, doorY, doorZ, dw - 4, dh - 4, dd, doorColor, "Porta Basculante", door, hingeY, hingeZ, -angle);
-            } else {
-              const angle = doorOpenAngle * (Math.PI / 2);
-              const isLeftHinge = dIdx % 2 === 0;
-              const hingeX = isLeftHinge ? (doorX - dw / 2) : (doorX + dw / 2);
-              const hingeZ = d;
-              addBoxFacesWithRotation(list, doorX, doorY, doorZ, dw - 4, dh - 4, dd, doorColor, "Porta Giro", door, hingeX, hingeZ, isLeftHinge ? -angle : angle);
+            // Puxador horizontal (exceto fecho e toque / perfil)
+            if (viewStyle !== "wireframe" && !classifyDoor(drawer.description || "").noHandle) {
+              addBoxFaces(list, cx, dyVal + dh / 2 - 24, frontZ + 18, Math.min(dw * 0.5, 500), 20, 14, HANDLE_COLOR, "Puxador", drawer);
             }
           });
+
+          // Expande a quantidade de cada porta em folhas individuais
+          const doorLeaves: any[] = [];
+          cabinetDoors.forEach((door: any) => {
+            const q = Math.max(1, Number(door.quantity) || 1);
+            for (let k = 0; k < q; k++) doorLeaves.push(door);
+          });
+
+          if (doorLeaves.length) {
+            const leafWidths = doorLeaves.map((dr) => dr.width || w / doorLeaves.length);
+            const totalLeafW = leafWidths.reduce((a, b) => a + b, 0);
+            // Centraliza o conjunto de folhas na frente do módulo
+            let cursor = cabinetX + Math.max(0, (w - totalLeafW) / 2);
+            const angle = doorOpenAngle * (Math.PI / 2);
+
+            doorLeaves.forEach((door: any, dIdx: number) => {
+              const leafW = leafWidths[dIdx];
+              const dh = Math.min(door.height || h, h);
+              const dd = Math.min(door.depth || 18, 30);
+              const drawW = Math.max(leafW - 6, 10); // fresta de 6mm entre folhas
+              const leafCenterX = cursor + leafW / 2;
+              const doorY = dh / 2;
+              const doorZ = d + dd / 2;
+
+              const desc = (door.description || "").toLowerCase();
+              const glass = isGlassy(door.materialType) || /vidro|espelho|reflecta/.test(desc);
+              const kind = classifyDoor(desc);
+
+              let doorColor = materialColor(door.materialType || obj.materialType);
+              if (viewStyle === "solid") doorColor = glass ? "#38bdf8" : "#f59e0b";
+              else if (viewStyle === "wireframe") doorColor = "rgba(245, 158, 11, 0.25)";
+
+              const showHandle = !kind.noHandle && !glass && viewStyle !== "wireframe";
+              const handleH = Math.min(dh * 0.55, 950);
+
+              if (kind.sliding) {
+                // Duas folhas em trilhas separadas (frente/trás), deslizam em sentidos opostos
+                const slideDir = dIdx % 2 === 0 ? 1 : -1;
+                const zLayer = dIdx % 2 === 0 ? doorZ : doorZ + dd + 5;
+                const slideOffset = doorOpenAngle * leafW * 0.9 * slideDir;
+                addBoxFaces(list, leafCenterX + slideOffset, doorY, zLayer, drawW, dh - 4, dd, doorColor, glass ? "Porta Vidro (correr)" : "Porta de Correr", door);
+                if (showHandle) {
+                  const hx = leafCenterX + slideOffset - slideDir * (drawW / 2 - 24);
+                  addBoxFaces(list, hx, doorY, zLayer + dd, 22, handleH, 14, HANDLE_COLOR, "Puxador", door);
+                }
+              } else if (kind.basculante) {
+                const hingeY = doorY + dh / 2;
+                addBoxFacesWithVerticalRotation(list, leafCenterX, doorY, doorZ, drawW, dh - 4, dd, doorColor, "Porta Basculante", door, hingeY, d, -angle);
+                if (showHandle) addBoxFacesWithVerticalRotation(list, leafCenterX, doorY - dh / 2 + 40, doorZ + dd, drawW * 0.5, 22, 16, HANDLE_COLOR, "Puxador", door, hingeY, d, -angle);
+              } else {
+                // Porta de giro — dobradiça alterna esquerda/direita entre folhas vizinhas
+                const isLeftHinge = dIdx % 2 === 0;
+                const hingeX = isLeftHinge ? leafCenterX - drawW / 2 : leafCenterX + drawW / 2;
+                const sgn = isLeftHinge ? -1 : 1;
+                addBoxFacesWithRotation(list, leafCenterX, doorY, doorZ, drawW, dh - 4, dd, doorColor, glass ? "Porta de Vidro" : "Porta de Giro", door, hingeX, d, sgn * angle);
+                if (showHandle) {
+                  const handleX = isLeftHinge ? leafCenterX + drawW / 2 - 26 : leafCenterX - drawW / 2 + 26;
+                  addBoxFacesWithRotation(list, handleX, doorY, doorZ + dd, 22, handleH, 16, HANDLE_COLOR, "Puxador", door, hingeX, d, sgn * angle);
+                }
+              }
+              cursor += leafW;
+            });
+          }
 
         } else if (obj.baseType === "table") {
           let tableColor = materialColor(obj.materialType);
@@ -687,7 +744,15 @@ export default function Projects() {
 
           if (obj.baseType === "standalone_sub" && ((obj.itemType || "").toLowerCase().includes("porta") || (obj.description || "").toLowerCase().includes("porta"))) {
             const angle = doorOpenAngle * (Math.PI / 2);
-            addBoxFacesWithRotation(list, cx, cy, cz, w, h, d || 18, otherColor, "Porta Individual", obj, cx - w / 2, cz, -angle);
+            const dd = Math.min(d || 18, 30);
+            const glass = isGlassy(obj.materialType) || /vidro|espelho|reflecta/.test((obj.description || "").toLowerCase());
+            const kind = classifyDoor(obj.description || "");
+            const dcolor = viewStyle === "solid" ? (glass ? "#38bdf8" : otherColor) : otherColor;
+            const hingeX = cx - w / 2;
+            addBoxFacesWithRotation(list, cx, cy, cz, w, h, dd, dcolor, glass ? "Porta de Vidro" : "Porta Individual", obj, hingeX, cz, -angle);
+            if (!kind.noHandle && !glass && viewStyle !== "wireframe") {
+              addBoxFacesWithRotation(list, cx + w / 2 - 26, cy, cz + dd, 22, Math.min(h * 0.55, 950), 16, HANDLE_COLOR, "Puxador", obj, hingeX, cz, -angle);
+            }
           } else {
             addBoxFaces(list, cx, cy, cz, w, h, d || 50, otherColor, obj.itemType || "Peça", obj);
           }
@@ -733,6 +798,19 @@ export default function Projects() {
     setZoom(Math.max(0.02, Math.min(0.4, fit)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected3DEnv, selected3DItemId, selectedProj?.id, activeTab]);
+
+  // Refs de câmera — desacoplam a animação do ciclo de render do React
+  // (evita setState por frame no loop de auto-rotação → sem "max update depth")
+  const yawRef = useRef(yaw);
+  const pitchRef = useRef(pitch);
+  const zoomRef = useRef(zoom);
+  const explodedRef = useRef(exploded);
+  const autoRotateRef = useRef(autoRotate);
+  useEffect(() => { yawRef.current = yaw; }, [yaw]);
+  useEffect(() => { pitchRef.current = pitch; }, [pitch]);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  useEffect(() => { explodedRef.current = exploded; }, [exploded]);
+  useEffect(() => { autoRotateRef.current = autoRotate; }, [autoRotate]);
 
   // Metadados do item selecionado no 3D (para overlay de informações)
   const selected3DMeta = useMemo(() => {
@@ -980,6 +1058,11 @@ export default function Projects() {
     let animationId: number;
 
     const render = () => {
+      // Lê a câmera dos refs (não do state) — loop roda sem re-render do React
+      const yaw = yawRef.current;
+      const pitch = pitchRef.current;
+      const zoom = zoomRef.current;
+      const exploded = explodedRef.current;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       // Draw background grid plane
@@ -1090,9 +1173,9 @@ export default function Projects() {
         ctx.stroke();
       });
 
-      // Update auto-rotation angle if enabled
-      if (autoRotate && !isDraggingRef.current) {
-        setYaw((y) => y + 0.003);
+      // Auto-rotação: mutação direta do ref (sem setState → sem re-render por frame)
+      if (autoRotateRef.current && !isDraggingRef.current) {
+        yawRef.current += 0.003;
       }
     };
 
@@ -1106,7 +1189,8 @@ export default function Projects() {
     return () => {
       cancelAnimationFrame(animationId);
     };
-  }, [faces3D, yaw, pitch, zoom, exploded, autoRotate, hovered3DItem, selected3DItem, activeTab, selected3DItemId, selectedItems]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [faces3D, viewStyle, hovered3DItem, selected3DItem, activeTab, selected3DItemId, selectedItems]);
 
   function project3D(v: Point3D, yaw: number, pitch: number, zoom: number, width: number, height: number) {
     // Centraliza sempre no centro geométrico do conteúdo em cena
@@ -1157,8 +1241,13 @@ export default function Projects() {
     const dx = e.clientX - dragStartRef.current.x;
     const dy = e.clientY - dragStartRef.current.y;
 
-    setYaw((y) => y + dx * 0.007);
-    setPitch((p) => Math.max(-Math.PI/2, Math.min(Math.PI/2, p - dy * 0.007)));
+    // Atualiza o ref (resposta imediata no loop) e sincroniza o state
+    const nextYaw = yawRef.current + dx * 0.007;
+    const nextPitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitchRef.current - dy * 0.007));
+    yawRef.current = nextYaw;
+    pitchRef.current = nextPitch;
+    setYaw(nextYaw);
+    setPitch(nextPitch);
 
     dragStartRef.current = { x: e.clientX, y: e.clientY };
   };
@@ -1168,7 +1257,9 @@ export default function Projects() {
   };
 
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    setZoom((z) => Math.max(0.04, Math.min(0.5, z - e.deltaY * 0.0001)));
+    const nextZoom = Math.max(0.02, Math.min(0.5, zoomRef.current - e.deltaY * 0.0001));
+    zoomRef.current = nextZoom;
+    setZoom(nextZoom);
   };
 
   // Todas as peças planas de corte, decompostas dos módulos extraídos
