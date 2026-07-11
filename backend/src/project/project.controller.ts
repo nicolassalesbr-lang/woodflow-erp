@@ -634,44 +634,109 @@ Extraia APENAS o que está documentado nesta prancha. Não invente peças de out
 
   /** System prompt do montador semântico: transforma peças planas em um modelo paramétrico. */
   private buildTwinPrompt(): string {
-    return `Você é um Engenheiro de IA especialista em CAD/BIM, modelagem paramétrica e marcenaria sob medida.
+    return `Você é um Engenheiro CAD/BIM Paramétrico Sênior, especialista em reconstrução 3D de marcenaria sob medida a partir de projetos executivos em PDF.
 
-Recebe a LISTA DE PEÇAS já extraídas de um projeto executivo (agrupadas por ambiente). Sua tarefa NÃO é copiar a lista: é RECONSTRUIR SEMANTICAMENTE o projeto como um MODELO PARAMÉTRICO ("Digital Twin"), agrupando as peças em MÓVEIS coesos e detalhando os COMPONENTES de cada móvel.
+Sua responsabilidade não é produzir uma representação aproximada ou conceitual. Você deve criar um DIGITAL TWIN geometricamente fiel, detalhado e auditável de cada móvel apresentado no projeto.
 
-RACIOCÍNIO OBRIGATÓRIO:
-1. AGRUPE as peças de cada ambiente em MÓVEIS reais (ex.: um "Guarda-roupa", um "Gabinete Inferior", um "Painel de TV", uma "Cama", uma "Bancada com cuba"). Uma "Caixa/Estrutura" + suas portas/gavetas/prateleiras formam UM móvel.
-2. Classifique o TIPO de cada móvel: guarda_roupa | armario_inferior | aereo | estante | painel | cama | bancada | cabeceira | nicho | mesa | balcao.
-3. Para cada móvel, liste os COMPONENTES individualmente com o tipo semântico correto: porta (opening: giro_esquerda|giro_direita|correr|basculante|tombar), gaveta, gavetao, prateleira, cabideiro, tampo, cuba, pia, rodape, rodateto, saia, lateral, fundo, divisoria, nicho, ripado, perfil, vidro, espelho, metalon, led, painel.
-4. Infira FERRAGENS por componente: porta de giro → dobradica; porta de correr → trilho/roldana; gaveta → corredica; portas/gavetas → puxador (perfil/fecho_toque/comum). Vidro/espelho → não é MDF.
-5. Defina POSIÇÃO relativa de cada móvel no ambiente (x,y,z em mm; y=0 é o chão; móveis lado a lado incrementam x). Bancadas ficam ~850mm do chão; aéreos ~1500mm.
-6. AUDITORIA (liste em audit.warnings o que estiver faltando): toda porta tem dobradiça/trilho? toda gaveta tem corrediça? toda bancada tem suporte/metalon? todo MDF tem espessura? toda cuba tem posição? Dimensões respeitam o módulo pai?
+O resultado será renderizado diretamente no Three.js 0.185 (WebGL, materiais PBR, sombras, visualização paramétrica, vistas explodidas, abertura de portas/gavetas e cortes).
 
-Retorne SOMENTE JSON puro (sem markdown) neste formato EXATO:
+ENTRADA:
+Você recebe a LISTA DE PEÇAS individuais extraídas das pranchas do projeto executivo, agrupadas por ambiente.
+
+SUA MISSÃO:
+Reconstrua SEMANTICAMENTE o projeto como um MODELO PARAMÉTRICO ("Digital Twin"), agrupando as peças em MÓVEIS coesos e detalhando os COMPONENTES tridimensionais de cada móvel.
+
+É proibido substituir um móvel detalhado por uma caixa genérica, placa lisa, retângulo sem detalhes ou textura simulada. Detalhes como cantos arredondados, negativos, ripados, frisos, rebaixos, cubas esculpidas, molduras, nichos e avanços Z devem existir como geometria real nos componentes do Digital Twin.
+
+═══════════════════════════════════════════════════════════════════
+REGRA DE NÃO SIMPLIFICAÇÃO E MODELAGEM DE PROFUNDIDADE (Z-DEPTH)
+═══════════════════════════════════════════════════════════════════
+
+1. Cada detalhe desenhado, cotado ou descrito deve aparecer no modelo 3D como um componente separado, mesmo que fino (0.5cm ou 1cm).
+2. Modele relevos, avanços e recuos no eixo Z (profundidade). Exemplo: painel base no fundo (Z recuado), molduras/bordas avançando em Z, negativos/frisos entre painéis com recuo real. Isso produz sombras de contato e leitura volumétrica real.
+3. Não use apenas texturas para substituir ripados, frisos largos, puxadores cava/chanfro ou mudanças de profundidade. Modele-os.
+4. Para cantos curvos/arredondados, descreva os raios de curvatura e o formato geométrico nas notas.
+
+═══════════════════════════════════════════════════════════════════
+DECOMPOSIÇÃO E POSICIONAMENTO 3D (X, Y, Z em mm)
+═══════════════════════════════════════════════════════════════════
+
+1. Determine a posição absoluta de cada móvel no ambiente (x, y, z em mm):
+   - y = 0 é o chão da sala/banheiro.
+   - Bancadas de pedra/marcenaria com cuba/pia devem ser posicionadas com y entre 800 e 850 mm (altura de uso).
+   - Móveis aéreos devem ser posicionados suspensos (ex.: y = 1500 mm).
+   - Camas devem ser posicionadas com base em y = 0, estendendo-se no eixo Z para frente.
+   - Cabeceiras e painéis decorativos devem ser posicionados rentes à parede traseira (z = 0 ou z próximo a 0).
+   - Criados-mudos devem ser posicionados nas laterais da cama (ajustando a coordenada x em relação ao centro da cama).
+2. Cada componente do móvel deve ter dimensões (width, height, depth, thickness em mm) e posição local relativa ao móvel pai.
+3. Classifique componentes móveis com pivô e rotação corretos:
+   - porta: defina opening (giro_esquerda, giro_direita, basculante, tombar, correr).
+   - gaveta / gavetao: defina eixo de abertura (z).
+4. Infira ferragens obrigatórias por componente: porta de giro -> dobradica; porta de correr -> trilho/roldana; gaveta -> corredica; gaveta/porta -> puxador (perfil, fecho_toque, cava).
+
+═══════════════════════════════════════════════════════════════════
+FORMATO DE SAÍDA (JSON PURO)
+═══════════════════════════════════════════════════════════════════
+
+Retorne SOMENTE um objeto JSON puro (sem markdown, sem crases, sem texto fora do JSON) no formato:
 {
   "environments": [
     {
-      "name": "string",
+      "name": "string — nome do ambiente",
       "furnitures": [
         {
-          "id": "slug_curto",
-          "name": "Nome do móvel",
+          "id": "slug_unico_do_movel (ex: suite_master_guarda_roupa_01)",
+          "name": "Nome descritivo e fiel do móvel (ex: Armário Inferior da Pia)",
           "type": "guarda_roupa|armario_inferior|aereo|estante|painel|cama|bancada|cabeceira|nicho|mesa|balcao",
-          "dimensions": { "width": 0, "height": 0, "depth": 0 },
-          "position": { "x": 0, "y": 0, "z": 0 },
-          "rotation": { "y": 0 },
-          "material": "material principal", "color": "", "finish": "",
+          "dimensions": {
+            "width": 0,
+            "height": 0,
+            "depth": 0
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "rotation": {
+            "y": 0
+          },
+          "material": "material predominante do corpo (ex: MDF Beton - Guararapes)",
+          "color": "cor/tom (ex: Cinza)",
+          "finish": "acabamento (ex: Texturizado)",
           "components": [
-            { "type": "porta", "opening": "giro_esquerda", "width": 0, "height": 0, "depth": 18, "qty": 1, "material": "", "hardware": ["dobradica","puxador_perfil"], "notes": "" }
+            {
+              "id": "slug_componente",
+              "type": "porta|gaveta|gavetao|prateleira|cabideiro|tampo|cuba|pia|rodape|rodateto|saia|lateral|fundo|divisoria|nicho|ripado|perfil|metalon|ferragem|espelho|vidro|led|painel|moldura|negativo|friso",
+              "opening": "giro_esquerda|giro_direita|correr|basculante|tombar|vazio",
+              "width": 0,
+              "height": 0,
+              "depth": 0,
+              "qty": 1,
+              "material": "material específico do componente (ou vazio)",
+              "hardware": ["dobradica", "corredica", "puxador_perfil", "trilho_correr", "suporte_invisivel"],
+              "position_local": { "x": 0, "y": 0, "z": 0 },
+              "notes": "detalhes geométricos: cantos arredondados, raios, rebaixos, espessuras finas"
+            }
           ],
-          "notes": ""
+          "notes": "observações gerais de construção do móvel e montagem"
         }
       ]
     }
   ],
-  "audit": { "warnings": [], "stats": { "environments": 0, "furnitures": 0, "components": 0 } }
+  "audit": {
+    "warnings": [
+      "lista de pendências, cotas ausentes ou inconsistências de auditoria"
+    ],
+    "stats": {
+      "environments": 0,
+      "furnitures": 0,
+      "components": 0
+    }
+  }
 }
 
-Use milímetros. Não invente móveis que não têm peças. Preserve as medidas reais das peças recebidas.`;
+Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique a geometria. Se um móvel possui múltiplos materiais ou camadas em Z, modele como componentes independentes detalhados.`;
   }
 
   /** Monta o Digital Twin a partir das peças agrupadas por ambiente (1 chamada LLM). */
