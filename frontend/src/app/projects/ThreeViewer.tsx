@@ -389,20 +389,50 @@ export default function ThreeViewer({ project }: Props) {
     });
   }, [doorOpen, isolate, ready]);
 
-  // Explosão: afasta cada móvel do centro
+  // Explosão: afasta componentes internos de cada móvel do seu centro
   useEffect(() => {
     const st = stateRef.current;
     if (!st?.root) return;
-    const center = new THREE.Box3().setFromObject(st.root).getCenter(new THREE.Vector3());
-    st.root.children.forEach((g: any) => {
-      if (!g.userData.basePos) g.userData.basePos = g.position.clone();
-      const base = g.userData.basePos as THREE.Vector3;
-      const dir = base.clone().sub(center).setY(0);
-      if (dir.lengthSq() < 1e-6) dir.set(1, 0, 0);
-      dir.normalize();
-      g.position.copy(base.clone().add(dir.multiplyScalar(explode * 2)));
+
+    // Para cada grupo de móvel (filho direto de root)
+    st.root.children.forEach((furnitureGroup: any) => {
+      if (furnitureGroup.type !== "Group") return;
+
+      // Calcula o centro local deste móvel
+      const bbox = new THREE.Box3().setFromObject(furnitureGroup);
+      if (bbox.isEmpty()) return;
+      const fCenter = bbox.getCenter(new THREE.Vector3());
+      // Converter centro para coordenadas locais do grupo
+      furnitureGroup.worldToLocal(fCenter);
+
+      // Percorre todos os filhos diretos do móvel (meshes e sub-groups como portas/gavetas)
+      furnitureGroup.children.forEach((child: any) => {
+        // Salva a posição original na primeira vez
+        if (!child.userData._explodeBase) {
+          child.userData._explodeBase = child.position.clone();
+        }
+        const base = child.userData._explodeBase as THREE.Vector3;
+
+        if (explode === 0) {
+          child.position.copy(base);
+          return;
+        }
+
+        // Direção do centro do móvel para este componente
+        const dir = base.clone().sub(fCenter);
+        // Se o componente está exatamente no centro, empurra para cima
+        if (dir.lengthSq() < 1e-8) dir.set(0, 0.3, 0);
+        dir.normalize();
+
+        // Fator de explosão proporcional ao tamanho do móvel
+        const size = bbox.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z, 0.3);
+        const explosionDistance = explode * maxDim * 0.6;
+
+        child.position.copy(base.clone().add(dir.multiplyScalar(explosionDistance)));
+      });
     });
-  }, [explode, ready, envFilter]);
+  }, [explode, ready, envFilter, furnitureFilter]);
 
   // Section plane (clipping)
   useEffect(() => {
