@@ -12,7 +12,7 @@ import { execSync } from 'child_process';
  */
 const PAGE_DPI = 200;
 /** How many Vision calls run in parallel (one per sheet). Keeps latency low without tripping rate limits. */
-const VISION_CONCURRENCY = 4;
+const VISION_CONCURRENCY = 3;
 /** Safety cap so a monster PDF never explodes cost/latency. */
 const MAX_PAGES = 40;
 
@@ -209,11 +209,12 @@ Retorne SOMENTE um objeto JSON puro (sem markdown, sem crases, sem texto fora do
 Extraia APENAS o que está documentado nas cotas e chamadas desta folha. Não invente peças de outras folhas. Se um móvel não tiver cota visível para uma dimensão, deduza pela proporção do desenho e pela espessura — mas nunca deixe 0.`;
   }
 
-  /** Low-level chat completion call. Returns the raw content string or null. */
+  /** Low-level chat completion call. Retries on 429/503 with backoff. */
   private async callVision(
     cfg: VisionConfig,
     messages: any[],
     maxTokens: number,
+    attempt: number = 0,
   ): Promise<string | null> {
     const requestBody: any = {
       messages,
@@ -229,6 +230,18 @@ Extraia APENAS o que está documentado nas cotas e chamadas desta folha. Não in
         headers: cfg.headers,
         body: JSON.stringify(requestBody),
       });
+
+      // Rate limit / indisponibilidade temporária → retry com backoff exponencial
+      if ((response.status === 429 || response.status === 503) && attempt < 5) {
+        const retryAfter = Number(response.headers.get('retry-after'));
+        const waitMs = retryAfter > 0
+          ? retryAfter * 1000
+          : Math.min(3000 * Math.pow(2, attempt), 30000);
+        console.warn(`[AI Reader] ${response.status} rate limit — retry em ${waitMs}ms (tentativa ${attempt + 1}/5)`);
+        await new Promise((r) => setTimeout(r, waitMs));
+        return this.callVision(cfg, messages, maxTokens, attempt + 1);
+      }
+
       if (!response.ok) {
         const errText = await response.text();
         console.error('[AI Reader] Vision request failed:', response.status, errText.substring(0, 300));
