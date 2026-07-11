@@ -574,6 +574,7 @@ Extraia APENAS o que está documentado nesta prancha. Não invente peças de out
     ];
 
     const content = await this.callVision(cfg, messages, 8192);
+    console.log(`[AI Reader] Sheet ${pageIndex + 1} raw content snippet:`, content ? (content.length > 500 ? content.substring(0, 500) + '...' : content) : 'NULL');
     const items = this.extractItemsFromContent(content);
     console.log(`[AI Reader] Sheet ${pageIndex + 1}/${totalPages}: ${items.length} item(s)${structuredContext ? ' (com Doc Intelligence)' : ''}.`);
     return items;
