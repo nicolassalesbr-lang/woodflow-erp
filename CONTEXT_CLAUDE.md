@@ -33,7 +33,7 @@ Endpoint `POST /projects/:id/parse` (recebe `{ filename, fileBase64, mimeType }`
 
 **Regras do system prompt (`buildSystemPrompt`)**: Prompt de **Especialista Sênior em Projetos Executivos de Marcenaria** com **22 regras fundamentais**, incluindo: cotas cm → ×10 para mm; preservação exata de valores; não inverter eixos; hierarquia módulo→subpeças expandida (30+ tipos: Caixa, Aéreo, Painel, Bancada, Cama, Gaveta, Gavetão, Ripado, Saia, Cuba, Perfil, Metalon, LED, Espelho, Vidro, etc.); leitura de legenda de materiais com fabricante/padrão literal ("MDF Beton - Guararapes"); extração de ferragens com códigos (P170, P1145, Oslo Espia); iluminação com temperatura (3000K vs 4000K); instruções de fabricação/instalação; **classificação de confiança** (explicita/calculada/inferida/estimada/ilegivel, 0-100); **auditoria de consistência** (soma de cotas, cruzamento de vistas, inventário 3D). maxTokens por folha: **8192**. **Sem números de exemplo hardcoded**.
 
-**IA em produção**: usa **OpenAI padrão** (`OPENAI_API_KEY=sk-proj-...`, `OPENAI_MODEL` no `backend/.env`). As chaves da Azure existem no `.env` mas **ainda não são usadas** por este controller (ver prompt de melhoria Azure).
+**IA em produção**: Prioriza **Azure OpenAI** (`AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT` no `backend/.env`) utilizando o deployment configurado de alta taxa de requisições. Se a Azure não estiver configurada, faz o fallback automático para a **OpenAI padrão** (`OPENAI_API_KEY`). Isso mitiga erros de Rate Limit 429 decorrentes do baixo limite de TPM da chave padrão da OpenAI.
 
 ## Frontend — área Projects (`frontend/src/app/projects/page.tsx`, ~2200 linhas)
 3 abas, todas alimentadas pelos itens extraídos:
@@ -70,3 +70,4 @@ Filosofia: **compreender → modelar (Digital Twin paramétrico) → renderizar*
 - `2bf5ea6` — Azure Document Intelligence + retry 429. `aae7316` — Digital Twin (backend). `b2c4698` — renderizador Three.js.
 - `f5a8462` — **Upgrade do prompt para Especialista Sênior** (22 regras, classificação de confiança, ferragens, iluminação, fabricação, auditoria, maxTokens 8192) (Antigravity).
 - `0dcfed8` — **Upgrade do prompt do Digital Twin** para Engenheiro CAD/BIM Paramétrico Sênior (Antigravity).
+- `706f268` — **Priorização do Azure OpenAI** para mitigar erros 429 e otimizar tempo de leitura do PDF (Antigravity).
