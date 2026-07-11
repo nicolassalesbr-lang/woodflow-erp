@@ -494,6 +494,18 @@ export default function Projects() {
         return (itemType.includes("painel") || desc.includes("painel")) && (i.width || 0) > 200 && (i.height || 0) > 200;
       });
 
+      const camas = envItems.filter((i) => {
+        const itemType = (i.itemType || "").toLowerCase();
+        const desc = (i.description || "").toLowerCase();
+        return itemType.includes("cama") || desc.includes("cama");
+      });
+
+      const niches = envItems.filter((i) => {
+        const itemType = (i.itemType || "").toLowerCase();
+        const desc = (i.description || "").toLowerCase();
+        return itemType.includes("nicho") || desc.includes("nicho");
+      });
+
       // 3. Classify sub-parts
       const subParts = envItems.filter((i) => {
         const itemType = (i.itemType || "").toLowerCase();
@@ -517,9 +529,11 @@ export default function Projects() {
         const isMesa = mesas.includes(i);
         const isCabec = cabeceiras.includes(i);
         const isPainel = paineis.includes(i);
+        const isCama = camas.includes(i);
+        const isNiche = niches.includes(i);
         const isSub = subParts.includes(i);
         
-        return !isCab && !isMesa && !isCabec && !isPainel && !isSub && (i.width || 0) > 100 && (i.height || 0) > 100;
+        return !isCab && !isMesa && !isCabec && !isPainel && !isCama && !isNiche && !isSub && (i.width || 0) > 100 && (i.height || 0) > 100;
       });
 
       // 5. Build base objects array
@@ -528,6 +542,8 @@ export default function Projects() {
       mesas.forEach((m) => baseObjects.push({ ...m, baseType: "table" }));
       cabeceiras.forEach((cb) => baseObjects.push({ ...cb, baseType: "headboard" }));
       paineis.forEach((p) => baseObjects.push({ ...p, baseType: "panel" }));
+      camas.forEach((cm) => baseObjects.push({ ...cm, baseType: "bed" }));
+      niches.forEach((n) => baseObjects.push({ ...n, baseType: "niche" }));
       otherBaseObjects.forEach((o) => baseObjects.push({ ...o, baseType: "other" }));
 
       // 6. Associate sub-parts to parent cabinets
@@ -570,17 +586,176 @@ export default function Projects() {
         }
       });
 
-      // 7. Render objects with offset layout
-      let cabinetX = envOffset;
+      // 7. Calculate relative positions for layout assembly
+      const positions = new Map<any, { cx: number; cy: number; cz: number }>();
+      const positioned = new Set<any>();
+      let currentX = envOffset;
 
+      const countertops = baseObjects.filter(
+        (o) =>
+          o.baseType === "table" &&
+          ((o.itemType || "").toLowerCase().includes("bancada") ||
+            (o.description || "").toLowerCase().includes("bancada"))
+      );
+      const beds = baseObjects.filter((o) => o.baseType === "bed");
+
+      // 7.1 Assemble Countertop-based layouts
+      countertops.forEach((top) => {
+        const tw = top.width || 1200;
+        const th = top.height || 200;
+        const td = top.depth || 600;
+
+        const tcx = currentX + tw / 2;
+        const tcy = 850 - th / 2;
+        const tcz = td / 2;
+
+        positions.set(top, { cx: tcx, cy: tcy, cz: tcz });
+        positioned.add(top);
+
+        // Find associated under-counter items
+        baseObjects.forEach((obj) => {
+          if (positioned.has(obj)) return;
+          const desc = (obj.description || "").toLowerCase();
+          const type = (obj.itemType || "").toLowerCase();
+
+          const isUnderCabinet =
+            type.includes("caixa") ||
+            type.includes("gaveta") ||
+            desc.includes("inferior") ||
+            desc.includes("gabinete") ||
+            desc.includes("balcão");
+          const isMetalon = desc.includes("metalon") || desc.includes("ferro") || desc.includes("suporte");
+
+          if (isUnderCabinet || isMetalon) {
+            const ow = obj.width || 800;
+            const oh = obj.height || 700;
+            const od = obj.depth || 500;
+
+            let ocx = tcx;
+            let ocy = 850 - th - oh / 2;
+            if (isMetalon) {
+              ocy = 850 / 2;
+            }
+            let ocz = od / 2;
+
+            if (isUnderCabinet) {
+              ocx = currentX + ow / 2;
+            } else if (isMetalon) {
+              ocx = currentX + tw - ow / 2;
+            }
+
+            positions.set(obj, { cx: ocx, cy: ocy, cz: ocz });
+            positioned.add(obj);
+          }
+        });
+
+        // Find associated above-counter items (niches, mirrors, aéreos)
+        baseObjects.forEach((obj) => {
+          if (positioned.has(obj)) return;
+          const desc = (obj.description || "").toLowerCase();
+          const type = (obj.itemType || "").toLowerCase();
+
+          const isAboveItem =
+            type.includes("nicho") ||
+            type.includes("aéreo") ||
+            desc.includes("espelho") ||
+            desc.includes("nicho") ||
+            desc.includes("aéreo") ||
+            desc.includes("armário superior");
+
+          if (isAboveItem) {
+            const ow = obj.width || 800;
+            const oh = obj.height || 600;
+            const od = obj.depth || 300;
+
+            const ocx = tcx;
+            const ocy = 850 + 600 + oh / 2; // 600mm gap above countertop
+            const ocz = od / 2;
+
+            positions.set(obj, { cx: ocx, cy: ocy, cz: ocz });
+            positioned.add(obj);
+          }
+        });
+
+        currentX += tw + 400;
+      });
+
+      // 7.2 Assemble Bed-based layouts
+      beds.forEach((bed) => {
+        const bw = bed.width || 900;
+        const bh = bed.height || 400;
+        const bd = bed.depth || 2000;
+
+        const bcx = currentX + bw / 2;
+        const bcy = bh / 2;
+        const bcz = bd / 2 + 100;
+
+        positions.set(bed, { cx: bcx, cy: bcy, cz: bcz });
+        positioned.add(bed);
+
+        baseObjects.forEach((obj) => {
+          if (positioned.has(obj)) return;
+          const type = (obj.itemType || "").toLowerCase();
+          const desc = (obj.description || "").toLowerCase();
+
+          if (type.includes("cabeceira") || desc.includes("cabeceira")) {
+            const ow = obj.width || bw;
+            const oh = obj.height || 1000;
+            const od = obj.depth || 50;
+
+            const ocx = bcx;
+            const ocy = oh / 2;
+            const ocz = od / 2;
+
+            positions.set(obj, { cx: ocx, cy: ocy, cz: ocz });
+            positioned.add(obj);
+          } else if (desc.includes("criado") || desc.includes("mesinha") || desc.includes("cabeceira")) {
+            const ow = obj.width || 400;
+            const oh = obj.height || 500;
+            const od = obj.depth || 400;
+
+            const ocx = currentX - ow / 2 - 50;
+            const ocy = oh / 2;
+            const ocz = od / 2;
+
+            positions.set(obj, { cx: ocx, cy: ocy, cz: ocz });
+            positioned.add(obj);
+          }
+        });
+
+        currentX += bw + 500;
+      });
+
+      // 7.3 Position remaining items sequentially
+      baseObjects.forEach((obj) => {
+        if (positioned.has(obj)) return;
+
+        const w = obj.width || 800;
+        const h = obj.height || 800;
+        const d = obj.depth || 600;
+
+        const cx = currentX + w / 2;
+        const cy = h / 2;
+        const cz = d / 2;
+
+        positions.set(obj, { cx, cy, cz });
+        positioned.add(obj);
+
+        currentX += w + 400;
+      });
+
+      envOffset = currentX + 1000;
+
+      // 8. Render objects
       baseObjects.forEach((obj) => {
         const w = obj.width || 800;
         const h = obj.height || 800;
         const d = obj.depth || 600;
 
-        const cx = cabinetX + w / 2;
-        const cy = h / 2;
-        const cz = d / 2;
+        const pos = positions.get(obj) || { cx: currentX + w / 2, cy: h / 2, cz: d / 2 };
+        const cx = pos.cx;
+        const cy = pos.cy;
+        const cz = pos.cz;
 
         let baseColor = materialColor(obj.materialType); // cor do material real
         if (viewStyle === "solid") {
@@ -606,7 +781,7 @@ export default function Projects() {
           cabinetShelves.forEach((shelf: any, sIdx: number) => {
             const sw = shelf.width || (w - 36);
             const sd = shelf.depth || (d - 20);
-            const sy = (h / (cabinetShelves.length + 1)) * (sIdx + 1);
+            const sy = cy - h / 2 + (h / (cabinetShelves.length + 1)) * (sIdx + 1);
 
             let shelfColor = materialColor(shelf.materialType || obj.materialType);
             if (viewStyle === "solid") shelfColor = "#0f766e";
@@ -625,7 +800,7 @@ export default function Projects() {
             const dw = drawer.width || (w - 10);
             const dh = drawer.height || (h / (drawerLeaves.length || 1));
             const dd = drawer.depth || (d - 40);
-            const dyVal = (dh / 2) + (dIdx * dh);
+            const dyVal = cy - h / 2 + (dh / 2) + (dIdx * dh);
 
             const slideOffset = doorOpenAngle * 250;
             const drawerZ = cz + slideOffset;
@@ -654,7 +829,7 @@ export default function Projects() {
             const leafWidths = doorLeaves.map((dr) => dr.width || w / doorLeaves.length);
             const totalLeafW = leafWidths.reduce((a, b) => a + b, 0);
             // Centraliza o conjunto de folhas na frente do módulo
-            let cursor = cabinetX + Math.max(0, (w - totalLeafW) / 2);
+            let cursor = (cx - w / 2) + Math.max(0, (w - totalLeafW) / 2);
             const angle = doorOpenAngle * (Math.PI / 2);
 
             doorLeaves.forEach((door: any, dIdx: number) => {
@@ -663,8 +838,8 @@ export default function Projects() {
               const dd = Math.min(door.depth || 18, 30);
               const drawW = Math.max(leafW - 6, 10); // fresta de 6mm entre folhas
               const leafCenterX = cursor + leafW / 2;
-              const doorY = dh / 2;
-              const doorZ = d + dd / 2;
+              const doorY = cy - h / 2 + dh / 2;
+              const doorZ = cz + d / 2 + dd / 2;
 
               const desc = (door.description || "").toLowerCase();
               const glass = isGlassy(door.materialType) || /vidro|espelho|reflecta/.test(desc);
@@ -689,17 +864,17 @@ export default function Projects() {
                 }
               } else if (kind.basculante) {
                 const hingeY = doorY + dh / 2;
-                addBoxFacesWithVerticalRotation(list, leafCenterX, doorY, doorZ, drawW, dh - 4, dd, doorColor, "Porta Basculante", door, hingeY, d, -angle);
-                if (showHandle) addBoxFacesWithVerticalRotation(list, leafCenterX, doorY - dh / 2 + 40, doorZ + dd, drawW * 0.5, 22, 16, HANDLE_COLOR, "Puxador", door, hingeY, d, -angle);
+                addBoxFacesWithVerticalRotation(list, leafCenterX, doorY, doorZ, drawW, dh - 4, dd, doorColor, "Porta Basculante", door, hingeY, cz + d / 2, -angle);
+                if (showHandle) addBoxFacesWithVerticalRotation(list, leafCenterX, doorY - dh / 2 + 40, doorZ + dd, drawW * 0.5, 22, 16, HANDLE_COLOR, "Puxador", door, hingeY, cz + d / 2, -angle);
               } else {
                 // Porta de giro — dobradiça alterna esquerda/direita entre folhas vizinhas
                 const isLeftHinge = dIdx % 2 === 0;
                 const hingeX = isLeftHinge ? leafCenterX - drawW / 2 : leafCenterX + drawW / 2;
                 const sgn = isLeftHinge ? -1 : 1;
-                addBoxFacesWithRotation(list, leafCenterX, doorY, doorZ, drawW, dh - 4, dd, doorColor, glass ? "Porta de Vidro" : "Porta de Giro", door, hingeX, d, sgn * angle);
+                addBoxFacesWithRotation(list, leafCenterX, doorY, doorZ, drawW, dh - 4, dd, doorColor, glass ? "Porta de Vidro" : "Porta de Giro", door, hingeX, cz + d / 2, sgn * angle);
                 if (showHandle) {
                   const handleX = isLeftHinge ? leafCenterX + drawW / 2 - 26 : leafCenterX - drawW / 2 + 26;
-                  addBoxFacesWithRotation(list, handleX, doorY, doorZ + dd, 22, handleH, 16, HANDLE_COLOR, "Puxador", door, hingeX, d, sgn * angle);
+                  addBoxFacesWithRotation(list, handleX, doorY, doorZ + dd, 22, handleH, 16, HANDLE_COLOR, "Puxador", door, hingeX, cz + d / 2, sgn * angle);
                 }
               }
               cursor += leafW;
@@ -707,21 +882,36 @@ export default function Projects() {
           }
 
         } else if (obj.baseType === "table") {
+          const isCountertop = (obj.itemType || "").toLowerCase().includes("bancada") || (obj.description || "").toLowerCase().includes("bancada");
           let tableColor = materialColor(obj.materialType);
-          if (viewStyle === "solid") tableColor = "#4f46e5";
+          if (viewStyle === "solid") tableColor = isCountertop ? "#d97706" : "#4f46e5";
           else if (viewStyle === "wireframe") tableColor = "rgba(79, 70, 229, 0.15)";
 
-          addBoxFaces(list, cx, h - 15, cz, w, 30, d, tableColor, "Tampo Mesa", obj);
+          if (isCountertop) {
+            // Render Countertop: slab + front skirt (saia) + back splash (rodapia)
+            const slabTh = 30; // 3cm slab
+            const saiaH = 200; // 20cm front skirt
+            const rodapiaH = 200; // 20cm back splash
 
-          const legW = 40;
-          const legH = h - 30;
-          const legXOffset = w / 2 - 30;
-          const legZOffset = d / 2 - 30;
+            // 1. Main slab
+            addBoxFaces(list, cx, cy + h / 2 - slabTh / 2, cz, w, slabTh, d, tableColor, "Bancada (Tampo)", obj);
+            // 2. Front skirt
+            addBoxFaces(list, cx, cy + h / 2 - saiaH / 2, cz + d / 2 - 10, w, saiaH, 20, tableColor, "Bancada (Saia)", obj);
+            // 3. Back splash
+            addBoxFaces(list, cx, cy + h / 2 + rodapiaH / 2, cz - d / 2 + 10, w, rodapiaH, 20, tableColor, "Bancada (Rodapia)", obj);
+          } else {
+            addBoxFaces(list, cx, cy + h / 2 - 15, cz, w, 30, d, tableColor, "Tampo Mesa", obj);
 
-          addBoxFaces(list, cx - legXOffset, legH / 2, cz - legZOffset, legW, legH, legW, tableColor, "Pé Mesa", obj);
-          addBoxFaces(list, cx + legXOffset, legH / 2, cz - legZOffset, legW, legH, legW, tableColor, "Pé Mesa", obj);
-          addBoxFaces(list, cx - legXOffset, legH / 2, cz + legZOffset, legW, legH, legW, tableColor, "Pé Mesa", obj);
-          addBoxFaces(list, cx + legXOffset, legH / 2, cz + legZOffset, legW, legH, legW, tableColor, "Pé Mesa", obj);
+            const legW = 40;
+            const legH = h - 30;
+            const legXOffset = w / 2 - 30;
+            const legZOffset = d / 2 - 30;
+
+            addBoxFaces(list, cx - legXOffset, cy - h / 2 + legH / 2, cz - legZOffset, legW, legH, legW, tableColor, "Pé Mesa", obj);
+            addBoxFaces(list, cx + legXOffset, cy - h / 2 + legH / 2, cz - legZOffset, legW, legH, legW, tableColor, "Pé Mesa", obj);
+            addBoxFaces(list, cx - legXOffset, cy - h / 2 + legH / 2, cz + legZOffset, legW, legH, legW, tableColor, "Pé Mesa", obj);
+            addBoxFaces(list, cx + legXOffset, cy - h / 2 + legH / 2, cz + legZOffset, legW, legH, legW, tableColor, "Pé Mesa", obj);
+          }
 
         } else if (obj.baseType === "headboard") {
           let headColor = materialColor(obj.materialType);
@@ -736,6 +926,33 @@ export default function Projects() {
           else if (viewStyle === "wireframe") panelColor = "rgba(217, 119, 6, 0.15)";
 
           addBoxFaces(list, cx, cy, cz, w, h, d, panelColor, "Painel", obj);
+
+        } else if (obj.baseType === "bed") {
+          let bedColor = materialColor(obj.materialType);
+          if (viewStyle === "solid") bedColor = "#d97706";
+          else if (viewStyle === "wireframe") bedColor = "rgba(217, 119, 6, 0.15)";
+
+          // 1. Bed base frame (wood/material)
+          const baseH = Math.min(300, h * 0.7);
+          addBoxFaces(list, cx, cy - h / 2 + baseH / 2, cz, w, baseH, d, bedColor, "Cama (Base)", obj);
+
+          // 2. Mattress (white/gray)
+          let matColor = "#f3f4f6";
+          if (viewStyle === "wireframe") matColor = "rgba(240, 240, 240, 0.15)";
+          const mattressH = Math.min(200, h - baseH);
+          addBoxFaces(list, cx, cy - h / 2 + baseH + mattressH / 2, cz, w - 20, mattressH, d - 20, matColor, "Cama (Colchão)", obj);
+
+          // 3. Pillow
+          let pillowColor = "#ffffff";
+          if (viewStyle === "wireframe") pillowColor = "rgba(255, 255, 255, 0.1)";
+          addBoxFaces(list, cx, cy - h / 2 + baseH + mattressH + 20, cz - d / 2 + 250, w - 100, 50, 300, pillowColor, "Cama (Travesseiro)", obj);
+
+        } else if (obj.baseType === "niche") {
+          let nicheColor = materialColor(obj.materialType);
+          if (viewStyle === "solid") nicheColor = "#b45309";
+          else if (viewStyle === "wireframe") nicheColor = "rgba(180, 83, 9, 0.15)";
+
+          addHollowNiche(list, cx, cy, cz, w, h, d, 15, nicheColor, obj);
 
         } else {
           let otherColor = materialColor(obj.materialType);
@@ -757,11 +974,7 @@ export default function Projects() {
             addBoxFaces(list, cx, cy, cz, w, h, d || 50, otherColor, obj.itemType || "Peça", obj);
           }
         }
-
-        cabinetX += w + 350;
       });
-
-      envOffset += 4000;
     });
 
     return list;
@@ -895,6 +1108,26 @@ export default function Projects() {
     addBoxFaces(list, cx, cy - h / 2 + th / 2, cz, w - 2 * th, th, d, color, "Base", item);
     addBoxFaces(list, cx, cy + h / 2 - th / 2, cz, w - 2 * th, th, d, color, "Tampo Superior", item);
     addBoxFaces(list, cx, cy, cz - d / 2 + 3, w - 2 * th, h - 2 * th, 6, "#2d2016", "Fundo", item);
+  }
+
+  function addHollowNiche(
+    list: Face3D[],
+    cx: number,
+    cy: number,
+    cz: number,
+    w: number,
+    h: number,
+    d: number,
+    thickness: number,
+    color: string,
+    item: any
+  ) {
+    const th = thickness;
+    addBoxFaces(list, cx - w / 2 + th / 2, cy, cz, th, h, d, color, "Nicho Lateral Esquerda", item);
+    addBoxFaces(list, cx + w / 2 - th / 2, cy, cz, th, h, d, color, "Nicho Lateral Direita", item);
+    addBoxFaces(list, cx, cy - h / 2 + th / 2, cz, w - 2 * th, th, d, color, "Nicho Base", item);
+    addBoxFaces(list, cx, cy + h / 2 - th / 2, cz, w - 2 * th, th, d, color, "Nicho Topo", item);
+    addBoxFaces(list, cx, cy, cz - d / 2 + 2, w - 2 * th, h - 2 * th, 4, color, "Nicho Fundo", item);
   }
 
   function addBoxFacesWithRotation(

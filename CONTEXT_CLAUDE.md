@@ -31,14 +31,21 @@ Endpoint `POST /projects/:id/parse` (recebe `{ filename, fileBase64, mimeType }`
 4. `sanitizeItems` normaliza: coage números, exige ≥2 dimensões reais, e **substitui eixo fino 0 pela espessura** (senão o 3D colapsa a peça num plano). Calcula `area`/`volume`.
 5. Persiste em `ProjectItem` (campos: environment, itemType, description, codigo, width/height/depth/thickness, quantity, materialType, cor, acabamento, observacoes, area, volume). Atualiza `parseStatus` (EXTRACTING→INTERPRETING→VALIDATING→COMPLETED/FAILED) e `parseProgress`.
 
-**Regras do system prompt (`buildSystemPrompt`)**: cotas em **cm → ×10 para mm**; não inverter eixos (largura=horizontal, altura=vertical, profundidade=corte lateral); hierarquia módulo→subpeças; ler ambiente do título da folha; ler legenda de MATERIAIS. **Sem números de exemplo hardcoded** (evita o modelo ecoar o prompt).
+**Regras do system prompt (`buildSystemPrompt`)**: cotas em **cm → ×10 para mm**; não inverter eixos (largura=horizontal, altura=vertical, profundidade=corte lateral); hierarquia módulo→subpeças; ler ambiente do título da folha; ler legenda de MATERIAIS. Suporta tipo **Cama** e regras específicas para **Bancadas** de pedra (saia/rodapia). **Sem números de exemplo hardcoded** (evita o modelo ecoar o prompt).
 
 **IA em produção**: usa **OpenAI padrão** (`OPENAI_API_KEY=sk-proj-...`, `OPENAI_MODEL` no `backend/.env`). As chaves da Azure existem no `.env` mas **ainda não são usadas** por este controller (ver prompt de melhoria Azure).
 
 ## Frontend — área Projects (`frontend/src/app/projects/page.tsx`, ~2200 linhas)
 3 abas, todas alimentadas pelos itens extraídos:
 - **Detalhes**: agrupamento por ambiente com subtotais; cards ricos (código do balão, tipo, cor, acabamento, observações, medidas L/A/P, espessura, área); painel de Materiais com amostras de cor; resumo de produção.
-- **Modelo 3D**: motor próprio em Canvas 2D (projeção isométrica, sem libs). `faces3D` (useMemo) monta a cena: caixas ocas, prateleiras, gavetas, portas com dobradiça/correr/basculante, mesas, painéis, cabeceiras. Cores por material real (`materialColor`/`MATERIAL_PALETTE`). Câmera com **autofit** (`viewBounds`) e overlays HTML (info + legenda de materiais).
+- **Modelo 3D**: motor próprio em Canvas 2D (projeção isométrica, sem libs). `faces3D` (useMemo) monta a cena:
+  - **Layout de Montagem Relativa (Assembly)**: Agrupa e posiciona objetos de forma coesa por ambiente. Bancadas servem de âncora para posicionar armários inferiores embaixo (calculando a altura da saia) e nichos/espelhos acima. Camas alinham cabeceiras e criados-mudos na cabeceira da cama correspondente.
+  - **Renderizadores de Peças Especiais**:
+    - **Bancadas**: Renderiza o tampo horizontal de pedra + saia frontal descendo + rodapia traseiro subindo (sem pernas de madeira convencionais).
+    - **Cama**: Renderiza estrutura de base de madeira + colchão macio + travesseiros.
+    - **Nicho**: Renderiza nichos vazados tridimensionais de parede com espessura fina.
+    - **Móveis Vazados (Hollow Cabinets)**: Laterais, base, tampo e fundos recuados em MDF.
+  - Câmera com **autofit** (`viewBounds`) e overlays HTML (info + legenda de materiais). Cores por material real (`materialColor`/`MATERIAL_PALETTE`).
 - **Orçamento & Nesting**: `explodeToPanels` decompõe cada módulo em **peças planas de corte** (laterais, base, tampo, fundo, gavetas); `packPanels` (guillotine) empacota em chapas 2750×1840; exclui pedra/metal/vidro/tecido do MDF. `costBreakdown` (useMemo, ao vivo) = DRE transparente: MDF+perda, fita de borda por perímetro, ferragens por tipo, mão de obra por m² → markup, comissão, imposto, margem líquida vs meta. Preços de insumo editáveis.
 
 ### ⚠️ Padrão importante do 3D (câmera desacoplada do React)

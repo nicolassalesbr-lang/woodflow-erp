@@ -174,13 +174,14 @@ REGRAS DE LEITURA:
    • depth (profundidade): distância frente↔fundo, lida no CORTE lateral, na planta baixa ou na vista 3D.
    Valide a lógica física: torres e roupeiros têm altura >> largura; prateleiras e tampos têm profundidade relevante e espessura fina.
 
-3. ESPESSURA → thickness é a espessura do material (tipicamente 18mm para MDF; portas/frentes ~18-20mm; costas/fundo ~6-15mm). O eixo "fino" de uma porta é a profundidade; de uma prateleira/tampo é a altura. NUNCA retorne 0 em uma dimensão: se for o eixo fino da peça, use a espessura.
+3. ESPESSURA → thickness é a espessura do material (tipicamente 18mm para MDF; portas/frentes ~18-20mm; costas/fundo ~6-15mm). O eixo "fino" de uma porta é a profundidade; de uma prateleira/tampo é a altura. NUNCA retorne 0 in uma dimensão: se for o eixo fino da peça, use a espessura.
 
-4. HIERARQUIA → Primeiro o módulo (itemType "Caixa", "Aéreo", "Painel", "Estante") com as medidas EXTERNAS totais; depois cada subpeça (Porta, Gaveta, Prateleira, Nicho, Tampo, Cabideiro) com suas medidas próprias e quantity correta (ex.: "3 gavetas iguais" → um item com quantity 3).
+4. HIERARQUIA → Primeiro o módulo (itemType "Caixa", "Aéreo", "Painel", "Estante", "Bancada", "Cama") com as medidas EXTERNAS totais; depois cada subpeça (Porta, Gaveta, Prateleira, Nicho, Tampo, Cabideiro) com suas medidas próprias e quantity correta (ex.: "3 gavetas iguais" → um item com quantity 3).
+   *Nota sobre Bancadas (countertops)*: São feitas de pedra/madeira espessa, normalmente possuem saia frontal (saia) de 20cm de altura e rodopia de 20cm contra a parede. Extraia o tampo principal da bancada com sua largura e profundidade totais (ex: W: 1710, D: 370).
 
 5. AMBIENTE → Leia o título da própria folha (normalmente no canto superior, ex.: "EXECUTIVO MARCENÁRIA: ESCRITÓRIO/QUARTO" → environment "Escritório/Quarto") ou a legenda. Se a folha mostrar mais de um móvel de ambientes distintos, use o ambiente correto para cada um.
 
-6. MATERIAL E ACABAMENTO → Leia a legenda "MATERIAIS" e as chamadas com seta (ex.: "MDF Beton - Guararapes", "MDF Preto Trama - Duratex", "Espelho Prata", "Vidro Reflecta Fumê", "Madeira Natural Cinamomo"). Preencha materialType com o material, cor com o tom/cor quando indicado, e acabamento (ex.: "Polido Fosco", "Laqueado", "Fita de LED 3000k") quando descrito.
+6. MATERIAL E ACABAMENTO → Leia a legenda "MATERIAIS" e as chamadas com seta (ex.: "MDF Beton - Guararapes", "MDF Preto Trama - Duratex", "Espelho Prata", "Vidro Reflecta Fumê", "Madeira Natural Cinamomo", "Silestone Cinder Crazy"). Preencha materialType com o material, cor com o tom/cor quando indicado, e acabamento (ex.: "Polido Fosco", "Laqueado", "Fita de LED 3000k") quando descrito.
 
 7. OBSERVAÇÕES → Registre em observacoes qualquer nota técnica relevante da peça (ex.: "recorte para fita de led 3000k", "porta com sistema invisível S150", "puxador tipo fecho e toque", "perfil P1145 preto"). Em codigo, coloque a referência da peça quando houver (letras/números de balão como "A", "B", "C", "D", "E").
 
@@ -189,7 +190,7 @@ Retorne SOMENTE um objeto JSON puro (sem markdown, sem crases, sem texto fora do
   "items": [
     {
       "environment": "string",
-      "itemType": "Caixa|Aéreo|Painel|Estante|Porta|Gaveta|Prateleira|Nicho|Tampo|Bancada|Cabeceira|Mesa|Rodapé|Fundo|Cabideiro|Ferragem",
+      "itemType": "Caixa|Aéreo|Painel|Estante|Porta|Gaveta|Prateleira|Nicho|Tampo|Bancada|Cabeceira|Mesa|Cama|Rodapé|Fundo|Cabideiro|Ferragem",
       "description": "descrição técnica clara da peça",
       "codigo": "referência/balão (ou vazio)",
       "width": 0,
@@ -268,12 +269,130 @@ Extraia APENAS o que está documentado nas cotas e chamadas desta folha. Não in
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  //  CAMADA 1 — AZURE AI DOCUMENT INTELLIGENCE (layout/OCR + cotas + tabelas)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /** Resolve a config do Azure Document Intelligence, ou null se não configurado. */
+  private getDocIntelConfig(): { endpoint: string; key: string } | null {
+    const key = process.env.AZURE_AI_DOC_INTEL_KEY;
+    const endpoint = process.env.AZURE_AI_DOC_INTEL_ENDPOINT;
+    if (!key || !endpoint) return null;
+    return { endpoint: endpoint.replace(/\/$/, ''), key };
+  }
+
+  /**
+   * Envia o PDF ao modelo prebuilt-layout do Azure Document Intelligence e retorna,
+   * por página (índice 0-based), um contexto estruturado (texto OCR + tabelas em
+   * markdown + cotas numéricas com posição). Retorna [] se não configurado ou em
+   * caso de falha — o pipeline então segue só com a imagem (fallback silencioso).
+   */
+  private async analyzeLayout(pdfBuffer: Buffer): Promise<string[]> {
+    const di = this.getDocIntelConfig();
+    if (!di) return [];
+
+    const apiVersion = process.env.AZURE_AI_DOC_INTEL_API_VERSION || '2024-11-30';
+    const isNewApi = apiVersion >= '2024-11-30';
+    const analyzePath = isNewApi
+      ? `/documentintelligence/documentModels/prebuilt-layout:analyze?api-version=${apiVersion}`
+      : `/formrecognizer/documentModels/prebuilt-layout:analyze?api-version=${apiVersion}`;
+
+    try {
+      const submit = await fetch(`${di.endpoint}${analyzePath}`, {
+        method: 'POST',
+        headers: { 'Ocp-Apim-Subscription-Key': di.key, 'Content-Type': 'application/pdf' },
+        body: pdfBuffer as any,
+      });
+      if (submit.status !== 202) {
+        console.warn('[Doc Intelligence] submit falhou:', submit.status, (await submit.text()).slice(0, 200));
+        return [];
+      }
+      const opLocation = submit.headers.get('operation-location') || submit.headers.get('Operation-Location');
+      if (!opLocation) return [];
+
+      // Polling da operação assíncrona (até ~60s)
+      let analyzeResult: any = null;
+      for (let attempt = 0; attempt < 30; attempt++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const poll = await fetch(opLocation, { headers: { 'Ocp-Apim-Subscription-Key': di.key } });
+        const data = await poll.json();
+        if (data.status === 'succeeded') { analyzeResult = data.analyzeResult; break; }
+        if (data.status === 'failed') { console.warn('[Doc Intelligence] análise falhou.'); return []; }
+      }
+      if (!analyzeResult) { console.warn('[Doc Intelligence] timeout no polling.'); return []; }
+
+      const contexts = this.buildPageContexts(analyzeResult);
+      console.log(`[Doc Intelligence] contexto estruturado de ${contexts.length} página(s).`);
+      return contexts;
+    } catch (err) {
+      console.warn('[Doc Intelligence] erro:', err);
+      return [];
+    }
+  }
+
+  /** Monta o contexto estruturado por página a partir do analyzeResult. */
+  private buildPageContexts(result: any): string[] {
+    const pages: any[] = result.pages || [];
+    const tables: any[] = result.tables || [];
+    const contexts: string[] = [];
+
+    pages.forEach((page: any, idx: number) => {
+      const pageNum = page.pageNumber || idx + 1;
+      const pw = page.width || 1;
+      const ph = page.height || 1;
+
+      const lines: string[] = (page.lines || []).map((l: any) => l.content).filter(Boolean);
+
+      // Cotas numéricas (1-4 dígitos) com posição normalizada 0-1 na folha
+      const cotas: string[] = [];
+      (page.words || []).forEach((w: any) => {
+        const t = String(w.content || '').trim();
+        if (/^\d{1,4}$/.test(t) && Array.isArray(w.polygon) && w.polygon.length >= 2) {
+          const x = (w.polygon[0] / pw).toFixed(2);
+          const y = (w.polygon[1] / ph).toFixed(2);
+          cotas.push(`${t}@(${x},${y})`);
+        }
+      });
+
+      const pageTables = tables.filter((tb: any) =>
+        (tb.boundingRegions || []).some((br: any) => br.pageNumber === pageNum),
+      );
+      const tablesMd = pageTables.map((tb: any) => this.tableToMarkdown(tb)).filter(Boolean).join('\n\n');
+
+      const parts: string[] = [];
+      if (lines.length) parts.push(`TEXTO OCR:\n${lines.join(' | ').slice(0, 3500)}`);
+      if (tablesMd) parts.push(`TABELAS/MEMORIAIS:\n${tablesMd.slice(0, 2500)}`);
+      if (cotas.length) parts.push(`COTAS (valor@posição x,y normalizada 0-1):\n${cotas.slice(0, 90).join('; ')}`);
+      contexts[idx] = parts.join('\n\n');
+    });
+    return contexts;
+  }
+
+  /** Converte uma tabela do Doc Intelligence em markdown. */
+  private tableToMarkdown(table: any): string {
+    const rows = table.rowCount || 0;
+    const cols = table.columnCount || 0;
+    if (!rows || !cols) return '';
+    const grid: string[][] = Array.from({ length: rows }, () => Array(cols).fill(''));
+    (table.cells || []).forEach((c: any) => {
+      if (c.rowIndex < rows && c.columnIndex < cols) {
+        grid[c.rowIndex][c.columnIndex] = String(c.content || '').replace(/\n/g, ' ').trim();
+      }
+    });
+    return grid.map((r) => '| ' + r.join(' | ') + ' |').join('\n');
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  CAMADA 2 — GPT-4o VISION (raciocínio geométrico + cruzamento com Camada 1)
+  // ─────────────────────────────────────────────────────────────────────────
+
   /** Analyze a single sheet image and return its extracted items. */
   private async analyzePage(
     cfg: VisionConfig,
     imageBase64: string,
     pageIndex: number,
     totalPages: number,
+    structuredContext?: string,
   ): Promise<any[]> {
     const userContent: any[] = [
       {
@@ -286,6 +405,17 @@ Extraia APENAS o que está documentado nas cotas e chamadas desta folha. Não in
       },
     ];
 
+    if (structuredContext && structuredContext.length > 20) {
+      userContent.push({
+        type: 'text',
+        text:
+          `\n\nDADOS ESTRUTURADOS DESTA FOLHA (extraídos por OCR/layout do Azure Document Intelligence). ` +
+          `Use estes VALORES como fonte da verdade para as cotas exatas e cruze-os com a imagem para associar cada cota à peça correta ` +
+          `(pela proximidade das posições x,y). Ainda assim aplique a regra cm→mm (×10). ` +
+          `Se uma medida não tiver cota correspondente aqui, registre "medida estimada" em observacoes.\n\n${structuredContext}`,
+      });
+    }
+
     const messages = [
       { role: 'system', content: this.buildSystemPrompt() },
       { role: 'user', content: userContent },
@@ -293,7 +423,7 @@ Extraia APENAS o que está documentado nas cotas e chamadas desta folha. Não in
 
     const content = await this.callVision(cfg, messages, 4096);
     const items = this.extractItemsFromContent(content);
-    console.log(`[AI Reader] Sheet ${pageIndex + 1}/${totalPages}: ${items.length} item(s).`);
+    console.log(`[AI Reader] Sheet ${pageIndex + 1}/${totalPages}: ${items.length} item(s)${structuredContext ? ' (com Doc Intelligence)' : ''}.`);
     return items;
   }
 
@@ -458,18 +588,25 @@ Extraia APENAS o que está documentado nas cotas e chamadas desta folha. Não in
         pageImages = [fileBase64]; // direct image upload
       }
 
+      // CAMADA 1: extração estrutural (Azure Document Intelligence), se configurado.
+      // Retorna contexto por página; [] se ausente → segue só com a imagem.
+      let pageContexts: string[] = [];
+      if (isPdf) {
+        pageContexts = await this.analyzeLayout(buffer);
+      }
+
       await this.prisma.project.update({
         where: { id },
         data: { parseStatus: 'INTERPRETING', parseProgress: 25 },
       });
 
-      // Analyze every sheet independently, in parallel — the core of the accuracy fix.
+      // CAMADA 2: analisa cada folha em paralelo (imagem + contexto estruturado).
       let rawItems: any[] = [];
       if (pageImages.length > 0) {
         const perPage = await this.runPool(
           pageImages,
           VISION_CONCURRENCY,
-          (img, idx) => this.analyzePage(cfg, img, idx, pageImages.length),
+          (img, idx) => this.analyzePage(cfg, img, idx, pageImages.length, pageContexts[idx]),
         );
         rawItems = perPage.flat();
       }
