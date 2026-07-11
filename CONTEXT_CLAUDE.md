@@ -58,7 +58,7 @@ O loop de animação (`requestAnimationFrame`) do canvas **NÃO** deve chamar `s
 
 ## ⭐ ARQUITETURA: Digital Twin → Three.js (nova)
 Filosofia: **compreender → modelar (Digital Twin paramétrico) → renderizar**. NÃO gerar 3D das linhas do PDF.
-- **Backend** gera `Project.digitalTwin` (Json): `{ environments[] → furnitures[] (type, dimensions, position, rotation, material, components[], notes) + audit }`. Método `assembleDigitalTwin` (1 chamada LLM sobre as peças extraídas). Rodar `npx prisma db push` ao deployar mudança de schema.
+- **Backend** gera `Project.digitalTwin` (Json): `{ environments[] → furnitures[] (type, dimensions, position, rotation, material, components[], notes) + audit }`. Método `assembleDigitalTwin` (1 chamada LLM sobre as peças extraídas). O prompt `buildTwinPrompt()` é baseado nas diretrizes de um **Engenheiro CAD/BIM Paramétrico Sênior**, focando em modelagem de profundidade real (Z-depth) para gerar sombras realistas, não simplificação de frisos, ripados, negativos e rebaixos (que devem ser gerados como componentes geométricos reais em vez de texturas), restrições de montagem (bancadas suspensas a 850mm, aéreos a 1500mm), pivôs funcionais e auditoria estrutural rígida. Rodar `npx prisma db push` ao deployar mudança de schema.
 - **Frontend** `frontend/src/app/projects/ThreeViewer.tsx` (three@0.185, `next/dynamic ssr:false`): consome o digitalTwin → cena Three.js com mesh por componente, materiais PBR (vidro/espelho/metal/pedra/LED/MDF), abrir portas/gavetas, explodir, isolar, section plane, export GLB. A aba 3D usa ThreeViewer se houver digitalTwin; senão o canvas antigo.
 - ⚠️ Deploy do frontend agora exige `npm install` na VPS (dep `three`) antes do `npm run build`.
 - Para melhorar a reconstrução, ajuste o prompt de `buildTwinPrompt()` (posições relativas, tipos, ferragens) e/ou os renderizadores em `buildFurniture()` no ThreeViewer.
@@ -69,3 +69,4 @@ Filosofia: **compreender → modelar (Digital Twin paramétrico) → renderizar*
 - `9a9d394` — detecção de portas + fix do loop do 3D. `eebd3e7` — montagem 3D relativa (Antigravity).
 - `2bf5ea6` — Azure Document Intelligence + retry 429. `aae7316` — Digital Twin (backend). `b2c4698` — renderizador Three.js.
 - `f5a8462` — **Upgrade do prompt para Especialista Sênior** (22 regras, classificação de confiança, ferragens, iluminação, fabricação, auditoria, maxTokens 8192) (Antigravity).
+- `0dcfed8` — **Upgrade do prompt do Digital Twin** para Engenheiro CAD/BIM Paramétrico Sênior (Antigravity).
