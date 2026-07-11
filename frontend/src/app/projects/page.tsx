@@ -58,6 +58,167 @@ interface Sheet {
   height: number;
   packed: PackedRect[];
   freeSpaces: { x: number; y: number; w: number; h: number }[];
+  material?: string;
+}
+
+// ── Materiais → cor realista (3D texturizado + legenda) ───────────────────────
+const MATERIAL_PALETTE: { match: string[]; color: string; label: string }[] = [
+  { match: ["preto trama", "preto", "black", "grafite"], color: "#2b2622", label: "MDF Preto" },
+  { match: ["beton", "concreto", "cimento", "cinza"], color: "#8f867a", label: "MDF Beton" },
+  { match: ["truffel", "tabaco", "conhaque", "chocolate", "café", "cafe", "marrom"], color: "#5b4634", label: "MDF Truffel" },
+  { match: ["freij", "carval", "nogueira", "cinamomo", "ripado", "madeira natural", "natural", "amêndoa", "amendoa"], color: "#8a5a34", label: "Madeira/Freijó" },
+  { match: ["canela", "tamarindo", "mel", "avelã", "avela", "nature"], color: "#a06a3a", label: "MDF Canela" },
+  { match: ["areia", "linho", "fendi", "cru", "off", "sahara", "camurça", "camurca"], color: "#c9b590", label: "MDF Areia" },
+  { match: ["branco", "white", "neve", "gelo", "polar"], color: "#e7e1d6", label: "Branco" },
+  { match: ["rosa", "sal", "nude", "blush"], color: "#c9a79b", label: "Rosé" },
+  { match: ["espelho", "mirror"], color: "#aebfc6", label: "Espelho" },
+  { match: ["vidro", "reflecta", "fum", "glass", "cristal"], color: "#5c6b72", label: "Vidro Fumê" },
+  { match: ["couro", "leather"], color: "#6b4a2f", label: "Couro" },
+];
+function materialColor(name?: string): string {
+  const n = (name || "").toLowerCase();
+  for (const p of MATERIAL_PALETTE) if (p.match.some((m) => n.includes(m))) return p.color;
+  return "#8c6c50";
+}
+function isGlassy(name?: string): boolean {
+  const n = (name || "").toLowerCase();
+  return ["espelho", "vidro", "reflecta", "fum", "mirror", "glass", "cristal"].some((m) => n.includes(m));
+}
+
+// ── Decomposição de um móvel em peças planas de corte ─────────────────────────
+interface Panel {
+  w: number;
+  h: number;
+  thickness: number;
+  material: string;
+  label: string;
+  parent: any;
+}
+const BACK_THICKNESS = 6; // fundos/costas em 6mm
+function explodeToPanels(item: any): Panel[] {
+  const W = Math.max(1, Number(item.width) || 0);
+  const H = Math.max(1, Number(item.height) || 0);
+  const D = Math.max(1, Number(item.depth) || 0);
+  const t = Number(item.thickness) || 18;
+  const mat = item.materialType || "MDF 18mm";
+  const qty = Math.max(1, Number(item.quantity) || 1);
+  const type = (item.itemType || "").toLowerCase();
+  const desc = (item.description || "").toLowerCase();
+  // Só entra no nesting o que é chapa de MDF/madeira. Pedra, metal, vidro,
+  // tecido, couro e ferragens são insumos separados — não viram chapa.
+  const NON_MDF = [
+    "espelho", "vidro", "reflecta", "fum", "mirror", "glass", "cristal",
+    "silestone", "granito", "quartzo", "mármore", "marmore", "porcelanato", "pedra",
+    "metalon", "metal", "aço", "inox", "alumínio", "aluminio",
+    "couro", "suede", "suedi", "tecido", "veludo", "led", "ferragem",
+  ];
+  const matTypeDesc = `${mat} ${type} ${desc}`.toLowerCase();
+  if (NON_MDF.some((k) => matTypeDesc.includes(k))) return [];
+
+  const mk = (w: number, h: number, thk: number, label: string): Panel => ({
+    w: Math.max(w, 1),
+    h: Math.max(h, 1),
+    thickness: thk,
+    material: mat,
+    label,
+    parent: item,
+  });
+
+  const base: Panel[] = [];
+  const isDrawer = type.includes("gaveta");
+  const isBox = ["caixa", "aéreo", "aereo", "estante", "armário", "armario", "gabinete", "balcão", "balcao", "roupeiro"].some(
+    (k) => type.includes(k),
+  );
+  const isFurnitureLike = type.includes("mesa") || type.includes("bancada");
+
+  if (isDrawer) {
+    base.push(mk(W, H, t, "Frente gaveta"));
+    base.push(mk(W - 2 * t, H, t, "Traseira gaveta"));
+    base.push(mk(D, H, t, "Lateral gaveta"));
+    base.push(mk(D, H, t, "Lateral gaveta"));
+    base.push(mk(W - 2 * t, D, BACK_THICKNESS, "Fundo gaveta"));
+  } else if (isBox) {
+    base.push(mk(D, H, t, "Lateral"));
+    base.push(mk(D, H, t, "Lateral"));
+    base.push(mk(W - 2 * t, D, t, "Base"));
+    base.push(mk(W - 2 * t, D, t, "Tampo"));
+    base.push(mk(W, H, BACK_THICKNESS, "Fundo/costa"));
+  } else if (isFurnitureLike) {
+    base.push(mk(W, D, t, "Tampo"));
+    base.push(mk(D, H, t, "Lateral/Pé"));
+    base.push(mk(D, H, t, "Lateral/Pé"));
+  } else {
+    // Peça plana (porta, prateleira, painel, nicho, cabeceira, tampo, divisória…)
+    const dims = [W, H, D].sort((a, b) => b - a);
+    base.push(mk(dims[0], dims[1], t, item.itemType || "Painel"));
+  }
+
+  const out: Panel[] = [];
+  for (let q = 0; q < qty; q++) out.push(...base.map((p) => ({ ...p })));
+  return out;
+}
+
+// ── Guillotine/shelf packing de peças em chapas padrão ────────────────────────
+const SHEET_W = 2750;
+const SHEET_H = 1840;
+const SAW_KERF = 5;
+function packPanels(panels: Panel[]): Sheet[] {
+  const rects = panels.map((p, i) => ({
+    id: `${p.parent?.id || "p"}-${i}`,
+    w: Math.max(p.w, p.h),
+    h: Math.min(p.w, p.h),
+    parent: p.parent,
+    panel: p,
+  }));
+  rects.sort((a, b) => b.w * b.h - a.w * a.h);
+
+  const sheets: Sheet[] = [];
+  rects.forEach((rect) => {
+    let placed = false;
+    for (const sheet of sheets) {
+      for (let i = 0; i < sheet.freeSpaces.length; i++) {
+        const space = sheet.freeSpaces[i];
+        const fitsNormal = rect.w <= space.w && rect.h <= space.h;
+        const fitsRotated = rect.h <= space.w && rect.w <= space.h;
+        if (fitsNormal || fitsRotated) {
+          const w = fitsNormal ? rect.w : rect.h;
+          const h = fitsNormal ? rect.h : rect.w;
+          sheet.packed.push({ x: space.x, y: space.y, w, h, item: rect.panel });
+          const remW = space.w - w;
+          const remH = space.h - h;
+          sheet.freeSpaces.splice(i, 1);
+          if (remW > remH) {
+            if (remW > SAW_KERF) sheet.freeSpaces.push({ x: space.x + w + SAW_KERF, y: space.y, w: remW - SAW_KERF, h: space.h });
+            if (remH > SAW_KERF) sheet.freeSpaces.push({ x: space.x, y: space.y + h + SAW_KERF, w, h: remH - SAW_KERF });
+          } else {
+            if (remH > SAW_KERF) sheet.freeSpaces.push({ x: space.x, y: space.y + h + SAW_KERF, w: space.w, h: remH - SAW_KERF });
+            if (remW > SAW_KERF) sheet.freeSpaces.push({ x: space.x + w + SAW_KERF, y: space.y, w: remW - SAW_KERF, h });
+          }
+          placed = true;
+          break;
+        }
+      }
+      if (placed) break;
+    }
+    if (!placed) {
+      // clampa peças maiores que a chapa (seccionadas na prática) para não estourar
+      const pw = Math.min(rect.w, SHEET_W);
+      const ph = Math.min(rect.h, SHEET_H);
+      const newSheet: Sheet = {
+        width: SHEET_W,
+        height: SHEET_H,
+        packed: [{ x: 0, y: 0, w: pw, h: ph, item: rect.panel }],
+        freeSpaces: [],
+        material: rect.panel.material,
+      };
+      const remW = SHEET_W - pw;
+      const remH = SHEET_H - ph;
+      if (remW > SAW_KERF) newSheet.freeSpaces.push({ x: pw + SAW_KERF, y: 0, w: remW - SAW_KERF, h: SHEET_H });
+      if (remH > SAW_KERF) newSheet.freeSpaces.push({ x: 0, y: ph + SAW_KERF, w: pw, h: remH - SAW_KERF });
+      sheets.push(newSheet);
+    }
+  });
+  return sheets;
 }
 
 export default function Projects() {
@@ -79,6 +240,11 @@ export default function Projects() {
   const [commission, setCommission] = useState(5.0);
   const [taxPercent, setTaxPercent] = useState(6.0);
   const [wastePercent, setWastePercent] = useState(10.0);
+
+  // Preços de insumos (R$) — parametrizáveis para orçamento real
+  const [sheetPrice, setSheetPrice] = useState(340);   // R$ por chapa 2,75 x 1,84m
+  const [edgePrice, setEdgePrice] = useState(4.5);     // R$ por metro de fita de borda
+  const [laborPrice, setLaborPrice] = useState(210);   // R$ por m² de painel (corte + montagem)
 
   // 3D visualizer rotation and zoom controls
   const [yaw, setYaw] = useState<number>(-0.6);
@@ -111,13 +277,6 @@ export default function Projects() {
   const environments = useMemo(() => {
     const names = selectedItems.map((item: any) => item.environment);
     return Array.from(new Set(names)) as string[];
-  }, [selectedItems]);
-
-  const projectMaterials = useMemo(() => {
-    const mats = selectedItems
-      .filter((item: any) => item.width > 0 && item.height > 0 && !item.itemType.toLowerCase().includes("ferragem"))
-      .map((item: any) => item.materialType || "MDF 18mm");
-    return ["Todos", ...Array.from(new Set(mats))] as string[];
   }, [selectedItems]);
 
   const fetchProjects = async () => {
@@ -411,7 +570,7 @@ export default function Projects() {
         const cy = h / 2;
         const cz = d / 2;
 
-        let baseColor = "#4b3525"; // standard wood
+        let baseColor = materialColor(obj.materialType); // cor do material real
         if (viewStyle === "solid") {
           baseColor = "#0d9488"; // teal
         } else if (viewStyle === "wireframe") {
@@ -432,7 +591,7 @@ export default function Projects() {
             const sd = shelf.depth || (d - 20);
             const sy = (h / (cabinetShelves.length + 1)) * (sIdx + 1);
 
-            let shelfColor = "#785840";
+            let shelfColor = materialColor(shelf.materialType || obj.materialType);
             if (viewStyle === "solid") shelfColor = "#0f766e";
             else if (viewStyle === "wireframe") shelfColor = "rgba(15, 118, 110, 0.15)";
 
@@ -448,7 +607,7 @@ export default function Projects() {
             const slideOffset = doorOpenAngle * 250;
             const drawerZ = cz + slideOffset;
 
-            let drawerColor = "#5c4033";
+            let drawerColor = materialColor(drawer.materialType || obj.materialType);
             if (viewStyle === "solid") drawerColor = "#6366f1";
             else if (viewStyle === "wireframe") drawerColor = "rgba(99, 102, 241, 0.15)";
 
@@ -465,7 +624,7 @@ export default function Projects() {
             const doorY = dh / 2;
             const doorZ = d + dd / 2;
 
-            let doorColor = "#d4af37";
+            let doorColor = materialColor(door.materialType || obj.materialType);
             if (viewStyle === "solid") doorColor = "#f59e0b";
             else if (viewStyle === "wireframe") doorColor = "rgba(245, 158, 11, 0.25)";
 
@@ -491,7 +650,7 @@ export default function Projects() {
           });
 
         } else if (obj.baseType === "table") {
-          let tableColor = "#855e42";
+          let tableColor = materialColor(obj.materialType);
           if (viewStyle === "solid") tableColor = "#4f46e5";
           else if (viewStyle === "wireframe") tableColor = "rgba(79, 70, 229, 0.15)";
 
@@ -508,21 +667,21 @@ export default function Projects() {
           addBoxFaces(list, cx + legXOffset, legH / 2, cz + legZOffset, legW, legH, legW, tableColor, "Pé Mesa", obj);
 
         } else if (obj.baseType === "headboard") {
-          let headColor = "#92400e";
+          let headColor = materialColor(obj.materialType);
           if (viewStyle === "solid") headColor = "#b45309";
           else if (viewStyle === "wireframe") headColor = "rgba(180, 83, 9, 0.15)";
 
           addBoxFaces(list, cx, cy, cz, w, h, d, headColor, "Cabeceira", obj);
 
         } else if (obj.baseType === "panel") {
-          let panelColor = "#a16207";
+          let panelColor = materialColor(obj.materialType);
           if (viewStyle === "solid") panelColor = "#d97706";
           else if (viewStyle === "wireframe") panelColor = "rgba(217, 119, 6, 0.15)";
 
           addBoxFaces(list, cx, cy, cz, w, h, d, panelColor, "Painel", obj);
 
         } else {
-          let otherColor = "#8c6c50";
+          let otherColor = materialColor(obj.materialType);
           if (viewStyle === "solid") otherColor = "#6366f1";
           else if (viewStyle === "wireframe") otherColor = "rgba(99, 102, 241, 0.15)";
 
@@ -542,6 +701,54 @@ export default function Projects() {
 
     return list;
   }, [selectedItems, selected3DEnv, selected3DItemId, viewStyle, doorOpenAngle]);
+
+  // Limites do conteúdo 3D (centro + tamanho) para centralizar e enquadrar a câmera
+  const viewBounds = useMemo(() => {
+    if (!faces3D.length) return null;
+    let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    faces3D.forEach((f) =>
+      f.vertices.forEach((v) => {
+        minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x);
+        minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y);
+        minZ = Math.min(minZ, v.z); maxZ = Math.max(maxZ, v.z);
+      }),
+    );
+    return {
+      center: { x: (minX + maxX) / 2, y: (minY + maxY) / 2, z: (minZ + maxZ) / 2 },
+      size: { x: maxX - minX, y: maxY - minY, z: maxZ - minZ },
+    };
+  }, [faces3D]);
+
+  const centerRef = useRef({ x: 0, y: 0, z: 0 });
+  useEffect(() => {
+    if (viewBounds) centerRef.current = viewBounds.center;
+  }, [viewBounds]);
+
+  // Autofit do zoom apenas quando muda a seleção (não ao abrir portas/explodir)
+  useEffect(() => {
+    if (!viewBounds) return;
+    const spanX = Math.max(viewBounds.size.x, viewBounds.size.z) || 1;
+    const spanY = viewBounds.size.y || 1;
+    const fit = Math.min(680 / spanX, 460 / spanY);
+    setZoom(Math.max(0.02, Math.min(0.4, fit)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected3DEnv, selected3DItemId, selectedProj?.id, activeTab]);
+
+  // Metadados do item selecionado no 3D (para overlay de informações)
+  const selected3DMeta = useMemo(() => {
+    if (selected3DItemId === "Todos") return null;
+    return selectedItems.find((i: any) => i.id === selected3DItemId) || null;
+  }, [selected3DItemId, selectedItems]);
+
+  // Legenda de materiais presentes na cena 3D atual
+  const scene3DMaterials = useMemo(() => {
+    const set = new Set<string>();
+    faces3D.forEach((f) => {
+      const m = f.item?.materialType;
+      if (m) set.add(m);
+    });
+    return Array.from(set).slice(0, 8);
+  }, [faces3D]);
 
   function addBoxFaces(
     list: Face3D[],
@@ -883,48 +1090,6 @@ export default function Projects() {
         ctx.stroke();
       });
 
-      // Draw measurement lines (Cotes) if visualizing a single cabinet
-      if (selected3DItemId !== "Todos" && selectedItems.length) {
-        const item = selectedItems.find((i: any) => i.id === selected3DItemId);
-        if (item) {
-          const w = item.width || 800;
-          const h = item.height || 800;
-          const d = item.depth || 600;
-
-          // Project corner coordinates
-          const pBottomLeftFront = project3D({ x: 0, y: 0, z: d }, yaw, pitch, zoom, canvas.width, canvas.height);
-          const pBottomRightFront = project3D({ x: w, y: 0, z: d }, yaw, pitch, zoom, canvas.width, canvas.height);
-          const pTopLeftFront = project3D({ x: 0, y: h, z: d }, yaw, pitch, zoom, canvas.width, canvas.height);
-          const pBottomLeftBack = project3D({ x: 0, y: 0, z: 0 }, yaw, pitch, zoom, canvas.width, canvas.height);
-
-          ctx.strokeStyle = "#fb923c"; // premium orange
-          ctx.fillStyle = "#fb923c";
-          ctx.lineWidth = 1.2;
-          ctx.font = "bold 10px monospace";
-
-          // Width line and text
-          ctx.beginPath();
-          ctx.moveTo(pBottomLeftFront.x, pBottomLeftFront.y + 15);
-          ctx.lineTo(pBottomRightFront.x, pBottomRightFront.y + 15);
-          ctx.stroke();
-          ctx.fillText(`L: ${w}mm`, (pBottomLeftFront.x + pBottomRightFront.x) / 2 - 25, (pBottomLeftFront.y + pBottomRightFront.y) / 2 + 27);
-
-          // Height line and text
-          ctx.beginPath();
-          ctx.moveTo(pBottomLeftFront.x - 15, pBottomLeftFront.y);
-          ctx.lineTo(pTopLeftFront.x - 15, pTopLeftFront.y);
-          ctx.stroke();
-          ctx.fillText(`A: ${h}mm`, (pBottomLeftFront.x + pTopLeftFront.x) / 2 - 60, (pBottomLeftFront.y + pTopLeftFront.y) / 2);
-
-          // Depth line and text
-          ctx.beginPath();
-          ctx.moveTo(pBottomLeftBack.x - 12, pBottomLeftBack.y + 10);
-          ctx.lineTo(pBottomLeftFront.x - 12, pBottomLeftFront.y + 10);
-          ctx.stroke();
-          ctx.fillText(`P: ${d}mm`, (pBottomLeftBack.x + pBottomLeftFront.x) / 2 - 50, (pBottomLeftBack.y + pBottomLeftFront.y) / 2 + 20);
-        }
-      }
-
       // Update auto-rotation angle if enabled
       if (autoRotate && !isDraggingRef.current) {
         setYaw((y) => y + 0.003);
@@ -944,26 +1109,11 @@ export default function Projects() {
   }, [faces3D, yaw, pitch, zoom, exploded, autoRotate, hovered3DItem, selected3DItem, activeTab, selected3DItemId, selectedItems]);
 
   function project3D(v: Point3D, yaw: number, pitch: number, zoom: number, width: number, height: number) {
-    // Center point in coordinates
-    let offsetX = -800;
-    let offsetY = -400;
-    let offsetZ = -300;
-
-    if (selected3DItemId !== "Todos" && selectedItems.length) {
-      const item = selectedItems.find((i: any) => i.id === selected3DItemId);
-      if (item) {
-        const w = item.width || 800;
-        const h = item.height || 800;
-        const d = item.depth || 600;
-        offsetX = -w / 2;
-        offsetY = -h / 2;
-        offsetZ = -d / 2;
-      }
-    }
-
-    const px = v.x + offsetX;
-    const py = v.y + offsetY;
-    const pz = v.z + offsetZ;
+    // Centraliza sempre no centro geométrico do conteúdo em cena
+    const c = centerRef.current;
+    const px = v.x - c.x;
+    const py = v.y - c.y;
+    const pz = v.z - c.z;
 
     // Rotate Y (Yaw)
     const x1 = px * Math.cos(yaw) - pz * Math.sin(yaw);
@@ -1021,156 +1171,103 @@ export default function Projects() {
     setZoom((z) => Math.max(0.04, Math.min(0.5, z - e.deltaY * 0.0001)));
   };
 
-  // 2D Nesting Algorithm calculation
+  // Todas as peças planas de corte, decompostas dos módulos extraídos
+  const productionPanels: Panel[] = useMemo(
+    () => selectedItems.flatMap((item: any) => explodeToPanels(item)),
+    [selectedItems],
+  );
+
+  // Peças por material (para nesting por material)
+  const panelsByMaterial = useMemo(() => {
+    const groups: Record<string, Panel[]> = {};
+    productionPanels.forEach((p) => {
+      const m = p.material || "MDF 18mm";
+      (groups[m] = groups[m] || []).push(p);
+    });
+    return groups;
+  }, [productionPanels]);
+
+  // Materiais que viram chapa de MDF (para o filtro do plano de corte)
+  const projectMaterials = useMemo(
+    () => ["Todos", ...Object.keys(panelsByMaterial)],
+    [panelsByMaterial],
+  );
+
+  // 2D Nesting — chapas do material selecionado no visualizador
   const nestingSheets: Sheet[] = useMemo(() => {
-    if (!selectedItems.length) return [];
-    
-    const panels = selectedItems.filter(
-      (item: any) =>
-        item.width > 0 &&
-        item.height > 0 &&
-        !item.itemType.toLowerCase().includes("ferragem") &&
-        !item.description.toLowerCase().includes("ferragem")
-    );
-
-    // Apply material filter if selected
-    let materialsToProcess = Array.from(new Set(panels.map((p: any) => p.materialType || "MDF 18mm")));
-    if (selectedMaterial && selectedMaterial !== "Todos") {
-      materialsToProcess = [selectedMaterial];
-    }
-
+    if (!productionPanels.length) return [];
+    const mats = selectedMaterial && selectedMaterial !== "Todos"
+      ? [selectedMaterial]
+      : Object.keys(panelsByMaterial);
     const sheets: Sheet[] = [];
-    const sheetW = 2750;
-    const sheetH = 1840;
-    const sawKerf = 5;
+    mats.forEach((m) => {
+      const packed = packPanels(panelsByMaterial[m] || []);
+      packed.forEach((s) => (s.material = m));
+      sheets.push(...packed);
+    });
+    return sheets;
+  }, [productionPanels, panelsByMaterial, selectedMaterial]);
 
-    materialsToProcess.forEach((material) => {
-      const materialPanels = panels.filter((p: any) => (p.materialType || "MDF 18mm") === material);
-      
-      const rectsToPack: any[] = [];
-      materialPanels.forEach((p: any) => {
-        for (let i = 0; i < p.quantity; i++) {
-          rectsToPack.push({
-            id: `${p.id}-${i}`,
-            w: Math.max(p.width, p.height),
-            h: Math.min(p.width, p.height),
-            parent: p
-          });
-        }
-      });
+  // Orçamento real e transparente (DRE) — recalcula ao vivo com os parâmetros
+  const costBreakdown = useMemo(() => {
+    const panels = productionPanels;
+    if (!panels.length) return null;
 
-      // Sort descending by area
-      rectsToPack.sort((a, b) => b.w * b.h - a.w * a.h);
-
-      const materialSheets: Sheet[] = [];
-
-      rectsToPack.forEach((rect) => {
-        let placed = false;
-
-        for (const sheet of materialSheets) {
-          for (let i = 0; i < sheet.freeSpaces.length; i++) {
-            const space = sheet.freeSpaces[i];
-            const fitsNormal = rect.w <= space.w && rect.h <= space.h;
-            const fitsRotated = rect.h <= space.w && rect.w <= space.h;
-
-            if (fitsNormal || fitsRotated) {
-              const w = fitsNormal ? rect.w : rect.h;
-              const h = fitsNormal ? rect.h : rect.w;
-
-              sheet.packed.push({
-                x: space.x,
-                y: space.y,
-                w,
-                h,
-                item: rect.parent
-              });
-
-              const remW = space.w - w;
-              const remH = space.h - h;
-
-              sheet.freeSpaces.splice(i, 1);
-
-              if (remW > remH) {
-                if (remW > sawKerf) {
-                  sheet.freeSpaces.push({
-                    x: space.x + w + sawKerf,
-                    y: space.y,
-                    w: remW - sawKerf,
-                    h: space.h
-                  });
-                }
-                if (remH > sawKerf) {
-                  sheet.freeSpaces.push({
-                    x: space.x,
-                    y: space.y + h + sawKerf,
-                    w,
-                    h: remH - sawKerf
-                  });
-                }
-              } else {
-                if (remH > sawKerf) {
-                  sheet.freeSpaces.push({
-                    x: space.x,
-                    y: space.y + h + sawKerf,
-                    w: space.w,
-                    h: remH - sawKerf
-                  });
-                }
-                if (remW > sawKerf) {
-                  sheet.freeSpaces.push({
-                    x: space.x + w + sawKerf,
-                    y: space.y,
-                    w: remW - sawKerf,
-                    h
-                  });
-                }
-              }
-
-              placed = true;
-              break;
-            }
-          }
-          if (placed) break;
-        }
-
-        if (!placed) {
-          const newSheet: Sheet = {
-            width: sheetW,
-            height: sheetH,
-            packed: [{ x: 0, y: 0, w: rect.w, h: rect.h, item: rect.parent }],
-            freeSpaces: []
-          };
-
-          const remW = sheetW - rect.w;
-          const remH = sheetH - rect.h;
-
-          if (remW > sawKerf) {
-            newSheet.freeSpaces.push({
-              x: rect.w + sawKerf,
-              y: 0,
-              w: remW - sawKerf,
-              h: sheetH
-            });
-          }
-          if (remH > sawKerf) {
-            newSheet.freeSpaces.push({
-              x: 0,
-              y: rect.h + sawKerf,
-              w: rect.w,
-              h: remH - sawKerf
-            });
-          }
-
-          (newSheet as any).material = material;
-          materialSheets.push(newSheet);
-        }
-      });
-
-      sheets.push(...materialSheets);
+    // Chapas reais por material (independe do filtro do visualizador)
+    let totalSheets = 0;
+    const sheetsPerMaterial: Record<string, number> = {};
+    Object.entries(panelsByMaterial).forEach(([m, ps]) => {
+      const n = packPanels(ps).length;
+      sheetsPerMaterial[m] = n;
+      totalSheets += n;
     });
 
-    return sheets;
-  }, [selectedItems, selectedMaterial]);
+    // Área de painéis (m²) e fita de borda (m lineares nas bordas expostas)
+    let panelAreaM2 = 0;
+    let edgeMeters = 0;
+    panels.forEach((p) => {
+      panelAreaM2 += (p.w * p.h) / 1_000_000;
+      // fita nas 2 maiores arestas (frentes recebem perímetro cheio)
+      const isFront = /porta|frente|gaveta|tampo|prateleira/i.test(p.label);
+      const perimeter = (2 * (p.w + p.h)) / 1000;
+      edgeMeters += isFront ? perimeter : perimeter * 0.5;
+    });
+
+    // Ferragens estimadas a partir dos tipos de peça
+    let hinges = 0, slides = 0, handles = 0;
+    selectedItems.forEach((it: any) => {
+      const t = (it.itemType || "").toLowerCase();
+      const d = (it.description || "").toLowerCase();
+      const q = Math.max(1, Number(it.quantity) || 1);
+      if (t.includes("porta") || d.includes("porta")) {
+        if (!/correr|desliza|perfil p1?7?0/.test(d)) hinges += 2 * q; // dobradiças (giro)
+        handles += q;
+      }
+      if (t.includes("gaveta") || d.includes("gaveta")) { slides += q; handles += q; }
+    });
+    const HINGE = 9, SLIDE = 38, HANDLE = 16;
+    const hardwareCost = hinges * HINGE + slides * SLIDE + handles * HANDLE;
+
+    const mdfBase = totalSheets * sheetPrice;
+    const mdfCost = mdfBase * (1 + wastePercent / 100); // perda/refilo
+    const edgeCost = edgeMeters * edgePrice;
+    const laborCost = panelAreaM2 * laborPrice;
+
+    const custoDireto = mdfCost + edgeCost + hardwareCost + laborCost;
+    const precoVenda = custoDireto * markup;
+    const comissaoRS = precoVenda * (commission / 100);
+    const impostoRS = precoVenda * (taxPercent / 100);
+    const lucroLiquido = precoVenda - custoDireto - comissaoRS - impostoRS;
+    const margemLiquidaPct = precoVenda > 0 ? (lucroLiquido / precoVenda) * 100 : 0;
+
+    return {
+      totalSheets, sheetsPerMaterial, panelAreaM2, edgeMeters,
+      hinges, slides, handles,
+      mdfCost, edgeCost, hardwareCost, laborCost,
+      custoDireto, precoVenda, comissaoRS, impostoRS, lucroLiquido, margemLiquidaPct,
+      panelCount: panels.length,
+    };
+  }, [productionPanels, panelsByMaterial, selectedItems, sheetPrice, edgePrice, laborPrice, wastePercent, markup, commission, taxPercent]);
 
   // Nesting Canvas renderer
   useEffect(() => {
@@ -1225,25 +1322,27 @@ export default function Projects() {
       const rw = rect.w * scale;
       const rh = rect.h * scale;
 
-      // Dynamic color by environment
-      ctx.fillStyle = rect.item?.environment?.toLowerCase().includes("cozinha") ? "#ead5ba20" : "#d4af371a";
+      // Cor da peça pelo material real
+      const pmat = (rect.item as any)?.material || (sheet as any).material;
+      ctx.fillStyle = materialColor(pmat) + "44";
       ctx.fillRect(rx, ry, rw, rh);
 
       ctx.strokeStyle = "#ead5bac0";
       ctx.lineWidth = 0.8;
       ctx.strokeRect(rx, ry, rw, rh);
 
-      // Text inside part if large enough
-      if (rw > 50 && rh > 24) {
+      // Texto dentro da peça se couber
+      if (rw > 46 && rh > 22) {
         ctx.fillStyle = "#fff8f0";
         ctx.font = "9px sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
 
-        const text = `${rect.item?.description || "Peca"}`;
+        const label = `${(rect.item as any)?.label || "Peça"}`;
         const dims = `${Math.round(rect.w)}x${Math.round(rect.h)}`;
-        
-        ctx.fillText(text.slice(0, Math.floor(rw / 6)), rx + rw / 2, ry + rh / 2 - 5);
+
+        ctx.fillText(label.slice(0, Math.floor(rw / 6)), rx + rw / 2, ry + rh / 2 - 5);
+        ctx.fillStyle = "#cdbca7";
         ctx.fillText(dims, rx + rw / 2, ry + rh / 2 + 6);
       }
     });
@@ -1463,87 +1562,125 @@ export default function Projects() {
 
               {/* TAB 1: DETAILS */}
               {activeTab === "details" && (
-                <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_300px]">
-                  {/* Left: Ambientes e Medidas */}
-                  <div>
-                    <div className="mb-4 flex items-center justify-between">
-                      <h3 className="text-lg font-semibold tracking-tight text-[#fff8f0]">
-                        Ambientes e medidas
-                      </h3>
-                      <Layers className="h-5 w-5 text-[#d6ad79]" />
+                <div className="space-y-5">
+                  {/* Resumo de produção */}
+                  {selectedItems.length > 0 && (
+                    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                      <MiniStat label="Área de painéis" value={`${(costBreakdown?.panelAreaM2 || 0).toFixed(1)} m²`} />
+                      <MiniStat label="Chapas MDF (est.)" value={costBreakdown?.totalSheets ?? 0} />
+                      <MiniStat label="Peças de corte" value={costBreakdown?.panelCount ?? 0} />
+                      <MiniStat label="Materiais" value={new Set(selectedItems.map((i: any) => i.materialType)).size} />
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_300px]">
+                    {/* Left: Ambientes e Medidas agrupados */}
+                    <div>
+                      <div className="mb-4 flex items-center justify-between">
+                        <h3 className="text-lg font-semibold tracking-tight text-[#fff8f0]">
+                          Ambientes e medidas
+                        </h3>
+                        <Layers className="h-5 w-5 text-[#d6ad79]" />
+                      </div>
+
+                      {selectedItems.length ? (
+                        <div className="space-y-6">
+                          {environments.map((env) => {
+                            const envItems = selectedItems.filter((i: any) => i.environment === env);
+                            const envArea = envItems.reduce((s: number, i: any) => s + (i.area || 0), 0);
+                            const envQty = envItems.reduce((s: number, i: any) => s + (i.quantity || 1), 0);
+                            return (
+                              <div key={env}>
+                                <div className="mb-2.5 flex items-center justify-between gap-3 border-b border-[#e8d4b8]/10 pb-2">
+                                  <h4 className="text-sm font-bold uppercase tracking-[0.14em] text-[#c89a63]">{env}</h4>
+                                  <span className="shrink-0 text-[11px] text-[#a99680]">
+                                    {envItems.length} módulos · {envQty} pç · {envArea.toFixed(1)} m²
+                                  </span>
+                                </div>
+                                <div className="space-y-3">
+                                  {envItems.map((item: any) => (
+                                    <ItemDetailCard key={item.id} item={item} />
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="rounded-xl border border-dashed border-[#e8d4b8]/18 bg-[#fff7ed]/[0.035] p-8 text-center">
+                          <Maximize2 className="mx-auto h-7 w-7 text-[#d6ad79]" />
+                          <h4 className="mt-4 font-semibold text-[#fff8f0]">
+                            Nenhum ambiente organizado ainda
+                          </h4>
+                          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[#bba890]">
+                            Suba uma planta executiva em PDF para iniciar a extração automática.
+                          </p>
+                        </div>
+                      )}
                     </div>
 
-                    {selectedItems.length ? (
-                      <div className="space-y-3">
-                        {selectedItems.map((item: any) => (
-                          <div
-                            key={item.id}
-                            className="rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] p-4"
-                          >
-                            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-                              <div>
-                                <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#c89a63]">
-                                  {item.environment}
-                                </p>
-                                <h4 className="mt-1 font-semibold text-[#fff8f0]">
-                                  {item.description}
-                                </h4>
-                                <p className="mt-1 text-sm text-[#bba890]">
-                                  {item.materialType}
-                                </p>
-                              </div>
-                              {item.width > 0 && (
-                                <div className="grid grid-cols-3 gap-2 text-center text-xs text-[#cdbca7]">
-                                  <Measure label="L (mm)" value={item.width} />
-                                  <Measure label="A (mm)" value={item.height} />
-                                  <Measure label="P (mm)" value={item.depth} />
+                    {/* Right: Materiais + Fluxo */}
+                    <aside className="space-y-5">
+                      {selectedItems.length > 0 && (
+                        <div className="rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] p-5">
+                          <h3 className="mb-3 font-semibold tracking-tight text-[#fff8f0]">Materiais</h3>
+                          <div className="space-y-2.5">
+                            {Object.entries(
+                              selectedItems.reduce((acc: Record<string, number>, i: any) => {
+                                const m = i.materialType || "MDF 18mm";
+                                acc[m] = (acc[m] || 0) + (i.quantity || 1);
+                                return acc;
+                              }, {}),
+                            )
+                              .sort((a: any, b: any) => b[1] - a[1])
+                              .map(([mat, qty]: any) => (
+                                <div key={mat} className="flex items-center justify-between gap-2 text-xs">
+                                  <span className="flex min-w-0 items-center gap-2 text-[#e8d9c6]">
+                                    <span
+                                      className="h-3 w-3 shrink-0 rounded-sm ring-1 ring-white/10"
+                                      style={{ background: materialColor(mat) }}
+                                    />
+                                    <span className="truncate">{mat}</span>
+                                  </span>
+                                  <span className="shrink-0 text-[#a99680]">
+                                    {qty} pç
+                                    {costBreakdown?.sheetsPerMaterial[mat]
+                                      ? ` · ${costBreakdown.sheetsPerMaterial[mat]} ch`
+                                      : ""}
+                                  </span>
                                 </div>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="rounded-xl border border-dashed border-[#e8d4b8]/18 bg-[#fff7ed]/[0.035] p-8 text-center">
-                        <Maximize2 className="mx-auto h-7 w-7 text-[#d6ad79]" />
-                        <h4 className="mt-4 font-semibold text-[#fff8f0]">
-                          Nenhum ambiente organizado ainda
-                        </h4>
-                        <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[#bba890]">
-                          Suba uma planta executiva em PDF para iniciar a extração automática.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Right: Fluxo do Projeto */}
-                  <aside className="rounded-xl border border-[#d6ad79]/18 bg-[#d6ad79]/10 p-5">
-                    <h3 className="font-semibold tracking-tight text-[#fff8f0]">
-                      Fluxo do projeto
-                    </h3>
-                    <div className="mt-5 space-y-4">
-                      {[
-                        "Briefing recebido",
-                        "Ambientes definidos",
-                        "Medidas revisadas",
-                        "Orcamento pronto"
-                      ].map((step, index) => (
-                        <div key={step} className="flex gap-3">
-                          <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#ead5ba] text-[#20170f]">
-                            <CheckCircle className="h-3.5 w-3.5" />
-                          </div>
-                          <div>
-                            <p className="text-sm font-semibold text-[#fff8f0]">
-                              {step}
-                            </p>
-                            <p className="text-xs text-[#bba890]">
-                              Etapa {index + 1}
-                            </p>
+                              ))}
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  </aside>
+                      )}
+
+                      <div className="rounded-xl border border-[#d6ad79]/18 bg-[#d6ad79]/10 p-5">
+                        <h3 className="font-semibold tracking-tight text-[#fff8f0]">Fluxo do projeto</h3>
+                        <div className="mt-5 space-y-4">
+                          {[
+                            { step: "Briefing recebido", done: true },
+                            { step: "Ambientes definidos", done: environments.length > 0 },
+                            { step: "Medidas revisadas", done: selectedItems.length > 0 },
+                            { step: "Orçamento pronto", done: !!costBreakdown },
+                          ].map((s, index) => (
+                            <div key={s.step} className="flex gap-3">
+                              <div
+                                className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
+                                  s.done ? "bg-[#ead5ba] text-[#20170f]" : "bg-[#211811] text-[#7f705f] ring-1 ring-[#e8d4b8]/15"
+                                }`}
+                              >
+                                <CheckCircle className="h-3.5 w-3.5" />
+                              </div>
+                              <div>
+                                <p className={`text-sm font-semibold ${s.done ? "text-[#fff8f0]" : "text-[#8c7c68]"}`}>{s.step}</p>
+                                <p className="text-xs text-[#bba890]">Etapa {index + 1}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </aside>
+                  </div>
                 </div>
               )}
 
@@ -1565,10 +1702,45 @@ export default function Projects() {
                           onMouseLeave={handleMouseUp}
                           onWheel={handleWheel}
                         />
+                        {/* Info overlay (top-left) */}
+                        <div className="pointer-events-none absolute left-4 top-4 max-w-[280px] rounded-xl border border-[#e8d4b8]/12 bg-[#0b0907]/85 px-3.5 py-2.5 backdrop-blur">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#c89a63]">
+                            {selected3DEnv === "Todas" ? "Todos os ambientes" : selected3DEnv}
+                          </p>
+                          <p className="mt-0.5 text-sm font-semibold leading-snug text-[#fff8f0]">
+                            {selected3DMeta ? selected3DMeta.description : "Ambiente completo"}
+                          </p>
+                          {selected3DMeta && (
+                            <div className="mt-1.5 flex items-center gap-2 font-mono text-[11px] text-[#fb923c]">
+                              <span>L {selected3DMeta.width}</span>
+                              <span className="text-[#e8d4b8]/30">×</span>
+                              <span>A {selected3DMeta.height}</span>
+                              <span className="text-[#e8d4b8]/30">×</span>
+                              <span>P {selected3DMeta.depth}</span>
+                              <span className="text-[#8c7c68]">mm</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Materials legend (top-right) */}
+                        {scene3DMaterials.length > 0 && viewStyle === "textured" && (
+                          <div className="pointer-events-none absolute right-4 top-4 rounded-xl border border-[#e8d4b8]/12 bg-[#0b0907]/85 px-3 py-2 backdrop-blur">
+                            <p className="mb-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-[#8c7c68]">Materiais</p>
+                            <div className="space-y-1">
+                              {scene3DMaterials.map((m) => (
+                                <div key={m} className="flex items-center gap-2 text-[10px] text-[#cdbca7]">
+                                  <span className="h-2.5 w-2.5 rounded-sm ring-1 ring-white/10" style={{ background: materialColor(m) }} />
+                                  <span className="max-w-[130px] truncate">{m}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         {/* Overlay Controls */}
                         <div className="absolute bottom-5 left-5 flex gap-2">
                           <button
-                            onClick={() => { setYaw(-0.6); setPitch(-0.4); setZoom(0.12); }}
+                            onClick={() => { setYaw(-0.6); setPitch(-0.4); }}
                             className="rounded-lg bg-[#211811]/90 border border-[#e8d4b8]/20 px-3 py-1.5 text-xs text-[#ead5ba] hover:bg-[#382b20]"
                           >
                             Reset
@@ -1685,7 +1857,6 @@ export default function Projects() {
                               onClick={() => {
                                 setYaw(camera.yaw);
                                 setPitch(camera.pitch);
-                                setZoom(0.15); // Autofit zoom
                                 setAutoRotate(false); // Pause auto rotation
                               }}
                               className="rounded-lg bg-[#18120d]/80 border border-[#e8d4b8]/10 px-2 py-1 text-[10px] text-[#bba890] hover:text-[#ead5ba] hover:bg-[#382b20] font-bold"
@@ -1823,26 +1994,24 @@ export default function Projects() {
                               <table className="w-full text-left text-xs border-collapse">
                                 <thead>
                                   <tr className="border-b border-[#e8d4b8]/10 text-[#bba890] font-bold">
-                                    <th className="py-2">Peça / Descrição</th>
-                                    <th className="py-2">Dimensões (mm)</th>
-                                    <th className="py-2 text-right">Espessura</th>
+                                    <th className="py-2">Peça</th>
+                                    <th className="py-2">Módulo</th>
+                                    <th className="py-2">Dim. (mm)</th>
+                                    <th className="py-2 text-right">Esp.</th>
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {nestingSheets[selectedSheetIndex]?.packed.map((part, pIdx) => (
-                                    <tr key={pIdx} className="border-b border-[#e8d4b8]/5 text-[#fff8f0]">
-                                      <td className="py-2 font-medium">
-                                        {part.item?.description || "Peça avulsa"} 
-                                        <span className="text-[10px] text-[#bba890] ml-2">({part.item?.environment})</span>
-                                      </td>
-                                      <td className="py-2 text-mono">
-                                        {Math.round(part.w)} x {Math.round(part.h)}
-                                      </td>
-                                      <td className="py-2 text-right text-mono">
-                                        {part.item?.thickness || 18} mm
-                                      </td>
-                                    </tr>
-                                  ))}
+                                  {nestingSheets[selectedSheetIndex]?.packed.map((part, pIdx) => {
+                                    const panel = part.item as any;
+                                    return (
+                                      <tr key={pIdx} className="border-b border-[#e8d4b8]/5 text-[#fff8f0]">
+                                        <td className="py-2 font-medium">{panel?.label || "Peça"}</td>
+                                        <td className="py-2 text-[#bba890]">{panel?.parent?.description?.slice(0, 28) || "—"}</td>
+                                        <td className="py-2 font-mono">{Math.round(part.w)} x {Math.round(part.h)}</td>
+                                        <td className="py-2 text-right font-mono">{panel?.thickness || 18}mm</td>
+                                      </tr>
+                                    );
+                                  })}
                                 </tbody>
                               </table>
                             </div>
@@ -1868,102 +2037,74 @@ export default function Projects() {
                         </h3>
                       </div>
 
-                      {/* Display final price */}
+                      {/* Preço de venda sugerido (ao vivo) */}
                       <div className="rounded-xl bg-[#d6ad79]/10 border border-[#d6ad79]/20 p-4 space-y-3">
                         <div className="text-center">
                           <div className="text-[10px] font-bold text-[#ead5ba] uppercase tracking-wider">Preço de Venda Sugerido</div>
                           <div className="text-3xl font-bold text-[#fff8f0] mt-1.5">
-                            {budget ? `R$ ${budget.finalPrice.toLocaleString('pt-BR')}` : 'R$ ---'}
+                            {costBreakdown ? brl(costBreakdown.precoVenda) : "R$ ---"}
                           </div>
+                          {costBreakdown && (
+                            <div
+                              className={`mt-1 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                                costBreakdown.margemLiquidaPct >= margin
+                                  ? "bg-emerald-500/15 text-emerald-300"
+                                  : "bg-[#fb923c]/15 text-[#fb923c]"
+                              }`}
+                            >
+                              Margem líquida {costBreakdown.margemLiquidaPct.toFixed(1)}%
+                              <span className="opacity-60">/ meta {margin}%</span>
+                            </div>
+                          )}
                         </div>
-                        
-                        {budget && (
+
+                        {costBreakdown && (
                           <div className="pt-2 border-t border-[#e8d4b8]/10 space-y-1.5 text-xs text-[#cdbca7]">
-                            <div className="flex justify-between">
-                              <span>Mdf/Matérias:</span>
-                              <span className="text-[#fff8f0] font-mono">{budget.totalMdfSheets} chapas (est. R$ 260/un)</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span>Ferragens/Acessórios:</span>
-                              <span className="text-[#fff8f0] font-mono">R$ {budget.totalHardwareCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span>Mão de Obra / Fabr.:</span>
-                              <span className="text-[#fff8f0] font-mono">R$ {budget.totalLaborCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                            </div>
-                            <div className="flex justify-between border-t border-[#e8d4b8]/5 pt-1.5 text-[#fb923c] font-bold">
-                              <span>Comissão ({commission}%):</span>
-                              <span className="font-mono">R$ {(budget.finalPrice * (commission/100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                            </div>
-                            <div className="flex justify-between text-[#ead5ba]">
-                              <span>Impostos ({taxPercent}%):</span>
-                              <span className="font-mono">R$ {(budget.finalPrice * (taxPercent/100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                            <BLine label={`MDF (${costBreakdown.totalSheets} chapas · perda ${wastePercent}%)`} value={brl(costBreakdown.mdfCost)} />
+                            <BLine label={`Fita de borda (${costBreakdown.edgeMeters.toFixed(0)} m)`} value={brl(costBreakdown.edgeCost)} />
+                            <BLine label={`Ferragens (${costBreakdown.hinges}dob · ${costBreakdown.slides}corr · ${costBreakdown.handles}pux)`} value={brl(costBreakdown.hardwareCost)} />
+                            <BLine label={`Mão de obra (${costBreakdown.panelAreaM2.toFixed(1)} m²)`} value={brl(costBreakdown.laborCost)} />
+                            <BLine label="Custo direto" value={brl(costBreakdown.custoDireto)} strong />
+                            <div className="!mt-2 border-t border-[#e8d4b8]/10 pt-2 space-y-1.5">
+                              <BLine label={`Comissão (${commission}%)`} value={`- ${brl(costBreakdown.comissaoRS)}`} tone="orange" />
+                              <BLine label={`Imposto (${taxPercent}%)`} value={`- ${brl(costBreakdown.impostoRS)}`} tone="orange" />
+                              <BLine label="Lucro líquido" value={brl(costBreakdown.lucroLiquido)} tone="green" strong />
                             </div>
                           </div>
                         )}
                       </div>
 
-                      <div className="space-y-4 text-sm">
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="text-xs text-[#bba890] block mb-1">Markup (x)</label>
-                            <input
-                              type="number"
-                              step="0.05"
-                              value={markup}
-                              onChange={(e) => setMarkup(parseFloat(e.target.value) || 1)}
-                              className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-3 py-2 text-[#fff8f0] outline-none focus:border-[#fb923c]/50"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-xs text-[#bba890] block mb-1">Margem Lucro (%)</label>
-                            <input
-                              type="number"
-                              value={margin}
-                              onChange={(e) => setMargin(parseFloat(e.target.value) || 0)}
-                              className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-3 py-2 text-[#fff8f0] outline-none focus:border-[#fb923c]/50"
-                            />
-                          </div>
-                        </div>
-
+                      {/* Parâmetros de preço dos insumos */}
+                      <div className="space-y-3">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-[#c89a63]">Preços dos insumos</p>
                         <div className="grid grid-cols-3 gap-2">
-                          <div>
-                            <label className="text-xs text-[#bba890] block mb-1">Comissão (%)</label>
-                            <input
-                              type="number"
-                              value={commission}
-                              onChange={(e) => setCommission(parseFloat(e.target.value) || 0)}
-                              className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-2 py-1.5 text-xs text-[#fff8f0] outline-none focus:border-[#fb923c]/50"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-xs text-[#bba890] block mb-1">Imposto (%)</label>
-                            <input
-                              type="number"
-                              value={taxPercent}
-                              onChange={(e) => setTaxPercent(parseFloat(e.target.value) || 0)}
-                              className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-2 py-1.5 text-xs text-[#fff8f0] outline-none focus:border-[#fb923c]/50"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-xs text-[#bba890] block mb-1">Perda (%)</label>
-                            <input
-                              type="number"
-                              value={wastePercent}
-                              onChange={(e) => setWastePercent(parseFloat(e.target.value) || 0)}
-                              className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-2 py-1.5 text-xs text-[#fff8f0] outline-none focus:border-[#fb923c]/50"
-                            />
-                          </div>
+                          <NumField label="Chapa (R$)" value={sheetPrice} onChange={setSheetPrice} step={10} />
+                          <NumField label="Fita (R$/m)" value={edgePrice} onChange={setEdgePrice} step={0.5} />
+                          <NumField label="M.O. (R$/m²)" value={laborPrice} onChange={setLaborPrice} step={10} />
                         </div>
-
-                        <button
-                          disabled={calculating || !selectedItems.length}
-                          onClick={calculateBudget}
-                          className="w-full rounded-xl bg-[#ead5ba] px-4 py-3 text-sm font-bold text-[#20170f] transition hover:bg-[#ffe4bf] disabled:opacity-50"
-                        >
-                          {calculating ? "Calculando..." : "Gerar Orçamento"}
-                        </button>
                       </div>
+
+                      {/* Parâmetros comerciais */}
+                      <div className="space-y-3">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-[#c89a63]">Margens & impostos</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <NumField label="Markup (x)" value={markup} onChange={setMarkup} step={0.05} />
+                          <NumField label="Margem alvo (%)" value={margin} onChange={setMargin} step={1} />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <NumField label="Comissão (%)" value={commission} onChange={setCommission} step={0.5} />
+                          <NumField label="Imposto (%)" value={taxPercent} onChange={setTaxPercent} step={0.5} />
+                          <NumField label="Perda (%)" value={wastePercent} onChange={setWastePercent} step={1} />
+                        </div>
+                      </div>
+
+                      <button
+                        disabled={calculating || !selectedItems.length}
+                        onClick={calculateBudget}
+                        className="w-full rounded-xl bg-[#ead5ba] px-4 py-3 text-sm font-bold text-[#20170f] transition hover:bg-[#ffe4bf] disabled:opacity-50"
+                      >
+                        {calculating ? "Salvando..." : "Salvar orçamento"}
+                      </button>
                     </aside>
                   </section>
                 </div>
@@ -2016,6 +2157,99 @@ function Measure({ label, value }: { label: string; value: any }) {
       <div className="font-bold text-[#fff8f0]">{value}</div>
       <div className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-[#a99680]">
         {label}
+      </div>
+    </div>
+  );
+}
+
+function brl(n: number): string {
+  return (n || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+}
+
+function BLine({ label, value, strong, tone }: { label: string; value: string; strong?: boolean; tone?: "orange" | "green" }) {
+  const color = tone === "orange" ? "text-[#fb923c]" : tone === "green" ? "text-emerald-300" : strong ? "text-[#fff8f0]" : "text-[#cdbca7]";
+  return (
+    <div className={`flex justify-between ${strong ? "font-bold" : ""} ${color}`}>
+      <span className={strong ? "" : "text-[#bba890]"}>{label}</span>
+      <span className="font-mono">{value}</span>
+    </div>
+  );
+}
+
+function NumField({ label, value, onChange, step }: { label: string; value: number; onChange: (n: number) => void; step?: number }) {
+  return (
+    <div>
+      <label className="mb-1 block text-[10px] text-[#bba890]">{label}</label>
+      <input
+        type="number"
+        step={step || 1}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+        className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-2.5 py-1.5 text-xs text-[#fff8f0] outline-none focus:border-[#fb923c]/50"
+      />
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: any }) {
+  return (
+    <div className="rounded-xl border border-[#e8d4b8]/12 bg-[#211811]/60 px-4 py-3">
+      <div className="text-lg font-semibold text-[#fff8f0]">{value}</div>
+      <div className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[#a99680]">{label}</div>
+    </div>
+  );
+}
+
+function ItemDetailCard({ item }: { item: any }) {
+  const hasMeasures = item.width > 0 || item.height > 0;
+  return (
+    <div className="rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] p-4 transition hover:border-[#d6ad79]/28">
+      <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+        <div className="min-w-0">
+          <div className="mb-1.5 flex flex-wrap items-center gap-2">
+            {item.codigo ? (
+              <span className="flex h-5 min-w-[20px] items-center justify-center rounded-md bg-[#d6ad79] px-1.5 text-[11px] font-black text-[#20170f]">
+                {item.codigo}
+              </span>
+            ) : null}
+            <span className="rounded-md border border-[#e8d4b8]/15 bg-[#211811]/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#c89a63]">
+              {item.itemType}
+            </span>
+            {item.quantity > 1 ? (
+              <span className="rounded-md bg-[#fb923c]/15 px-2 py-0.5 text-[10px] font-bold text-[#fb923c]">
+                {item.quantity}×
+              </span>
+            ) : null}
+          </div>
+          <h4 className="font-semibold leading-snug text-[#fff8f0]">{item.description}</h4>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-[#bba890]">
+            <span className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm ring-1 ring-white/10" style={{ background: materialColor(item.materialType) }} />
+              {item.materialType}
+            </span>
+            {item.cor ? <span className="text-[#a99680]">· {item.cor}</span> : null}
+            {item.acabamento ? <span className="text-[#a99680]">· {item.acabamento}</span> : null}
+          </div>
+          {item.observacoes ? (
+            <p className="mt-2 rounded-lg border border-[#e8d4b8]/10 bg-[#211811]/50 px-3 py-1.5 text-[11px] leading-5 text-[#a99680]">
+              {item.observacoes}
+            </p>
+          ) : null}
+        </div>
+
+        {hasMeasures && (
+          <div className="shrink-0">
+            <div className="grid grid-cols-3 gap-2 text-center text-xs text-[#cdbca7]">
+              <Measure label="L (mm)" value={item.width} />
+              <Measure label="A (mm)" value={item.height} />
+              <Measure label="P (mm)" value={item.depth} />
+            </div>
+            <div className="mt-2 flex items-center justify-end gap-3 text-[10px] text-[#8c7c68]">
+              <span>esp. {item.thickness || 18}mm</span>
+              {item.area ? <span>{Number(item.area).toFixed(2)} m²</span> : null}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
