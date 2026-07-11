@@ -241,6 +241,7 @@ export default function Projects() {
   const [projects, setProjects] = useState<any[]>([]);
   const [selectedProj, setSelectedProj] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
+  const [parseStage, setParseStage] = useState("");
   const [newProjName, setNewProjName] = useState("");
   const [newProjDesc, setNewProjDesc] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
@@ -378,14 +379,50 @@ export default function Projects() {
     }
   };
 
+  const STAGE_LABEL: Record<string, string> = {
+    EXTRACTING: "Lendo folhas...",
+    QUEUE: "Na fila...",
+    INTERPRETING: "Interpretando desenhos...",
+    VALIDATING: "Montando modelo 3D...",
+  };
+
+  // Parse assíncrono: acompanha parseStatus/parseProgress até concluir (evita 504 do nginx).
+  const pollParseStatus = async (projectId: string) => {
+    const terminal = ["COMPLETED", "FAILED", "IDLE"];
+    for (let i = 0; i < 200; i++) {
+      await new Promise((r) => setTimeout(r, 4000));
+      try {
+        const res = await fetch(`${getApiUrl()}/api/projects`, {
+          headers: { Authorization: "Bearer mock-jwt-token-2026" },
+        });
+        const list = await res.json();
+        const proj = Array.isArray(list) ? list.find((p: any) => p.id === projectId) : null;
+        if (!proj) continue;
+        setProjects(list);
+        setSelectedProj((cur: any) => (cur?.id === projectId ? proj : cur));
+        setParseStage(STAGE_LABEL[proj.parseStatus] || "");
+        if (terminal.includes(proj.parseStatus)) {
+          if (proj.parseStatus === "FAILED") {
+            alert("Falha no processamento: " + (proj.parseError || "erro desconhecido"));
+          }
+          return;
+        }
+      } catch {
+        /* rede instável — continua tentando */
+      }
+    }
+  };
+
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>, projectId: string) => {
     const file = event.target.files?.[0];
     if (!file) return;
     setUploading(true);
+    setParseStage("Enviando arquivo...");
     const reader = new FileReader();
     reader.onload = async () => {
       try {
         const base64 = (reader.result as string).split(",")[1];
+        // Inicia o parse (retorna 202 na hora; a análise roda em background no servidor).
         const res = await fetch(`${getApiUrl()}/api/projects/${projectId}/parse`, {
           method: "POST",
           headers: {
@@ -398,17 +435,18 @@ export default function Projects() {
             mimeType: file.type
           })
         });
-        if (res.ok) {
-          fetchProjects();
-        } else {
+        if (!res.ok) {
           const errMsg = await res.text();
-          throw new Error(errMsg || "Erro interno do servidor ao processar o arquivo.");
+          throw new Error(errMsg || "Erro ao iniciar o processamento.");
         }
+        setParseStage("Lendo folhas...");
+        await pollParseStatus(projectId);
       } catch (err: any) {
         console.error(err);
         alert("Falha no upload/processamento: " + (err.message || err));
       } finally {
         setUploading(false);
+        setParseStage("");
       }
     };
     reader.readAsDataURL(file);
@@ -1833,7 +1871,7 @@ export default function Projects() {
                     }`}
                   >
                     <FileUp className="h-4 w-4" />
-                    {uploading ? "Enviando..." : "Subir PDF"}
+                    {uploading ? (parseStage || "Enviando...") : "Subir PDF"}
                     <input
                       type="file"
                       className="hidden"

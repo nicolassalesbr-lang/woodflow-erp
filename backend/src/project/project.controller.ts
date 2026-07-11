@@ -866,6 +866,23 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
     // Wipe previous extraction so re-parses start clean.
     await this.prisma.projectItem.deleteMany({ where: { projectId: id } });
 
+    // Executa a análise pesada em BACKGROUND para não estourar o timeout do nginx (504).
+    // O frontend acompanha o progresso via polling de parseStatus/parseProgress.
+    this.runParseJob(id, project, filename, fileBase64, mimeType).catch((e) =>
+      console.error('[Parse Job] erro não tratado:', e),
+    );
+
+    return { success: true, started: true, parseStatus: 'EXTRACTING' };
+  }
+
+  /** Job pesado de análise do PDF, executado em background após o 202 inicial. */
+  private async runParseJob(
+    id: string,
+    project: any,
+    filename: string,
+    fileBase64: string,
+    mimeType: string,
+  ): Promise<void> {
     let sanitized: any[] = [];
     let isRealParsing = false;
     let parseError: string | null = null;
@@ -1045,17 +1062,6 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
     }
 
     console.log(`[AI Reader] DONE: ${items.length} items, real=${isRealParsing}, envs=${uniqueEnvironments.join(', ')}`);
-
-    if (parseError && items.length === 0) {
-      throw new HttpException(parseError, HttpStatus.UNPROCESSABLE_ENTITY);
-    }
-
-    return {
-      success: true,
-      itemsParsedCount: items.length,
-      environments: uniqueEnvironments,
-      items,
-      isReal: isRealParsing,
-    };
+    // Sem throw nem return: o parseStatus COMPLETED/FAILED comunica o resultado via polling.
   }
 }
