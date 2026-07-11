@@ -18,7 +18,11 @@ import {
   Settings,
   Percent
 } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import { getApiUrl } from '../../utils/api';
+
+// Three.js (Digital Twin) — client-only
+const ThreeViewer = dynamic(() => import('./ThreeViewer'), { ssr: false });
 
 const statusLabel: Record<string, string> = {
   DRAFT: "Briefing",
@@ -2009,7 +2013,9 @@ export default function Projects() {
               )}
 
               {/* TAB 2: 3D MODEL */}
-              {activeTab === "model3d" && (
+              {activeTab === "model3d" && (selectedProj?.digitalTwin ? (
+                <ThreeViewer project={selectedProj} />
+              ) : (
                 <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_320px]">
                   {/* Visualizer Canvas */}
                   <div className="relative rounded-2xl border border-[#e8d4b8]/10 bg-[#0b0907] p-1 flex flex-col justify-between">
@@ -2240,7 +2246,7 @@ export default function Projects() {
                     </div>
                   </aside>
                 </div>
-              )}
+              ))}
 
               {/* TAB 3: BUDGET & CUTTING LAYOUT */}
               {activeTab === "budgeting" && (
