@@ -31,7 +31,7 @@ Endpoint `POST /projects/:id/parse` (recebe `{ filename, fileBase64, mimeType }`
 4. `sanitizeItems` normaliza: coage números, exige ≥2 dimensões reais, e **substitui eixo fino 0 pela espessura** (senão o 3D colapsa a peça num plano). Calcula `area`/`volume`.
 5. Persiste em `ProjectItem` (campos: environment, itemType, description, codigo, width/height/depth/thickness, quantity, materialType, cor, acabamento, observacoes, area, volume). Atualiza `parseStatus` (EXTRACTING→INTERPRETING→VALIDATING→COMPLETED/FAILED) e `parseProgress`.
 
-**Regras do system prompt (`buildSystemPrompt`)**: cotas em **cm → ×10 para mm**; não inverter eixos (largura=horizontal, altura=vertical, profundidade=corte lateral); hierarquia módulo→subpeças; ler ambiente do título da folha; ler legenda de MATERIAIS. Suporta tipo **Cama** e regras específicas para **Bancadas** de pedra (saia/rodapia). **Sem números de exemplo hardcoded** (evita o modelo ecoar o prompt).
+**Regras do system prompt (`buildSystemPrompt`)**: Prompt de **Especialista Sênior em Projetos Executivos de Marcenaria** com **22 regras fundamentais**, incluindo: cotas cm → ×10 para mm; preservação exata de valores; não inverter eixos; hierarquia módulo→subpeças expandida (30+ tipos: Caixa, Aéreo, Painel, Bancada, Cama, Gaveta, Gavetão, Ripado, Saia, Cuba, Perfil, Metalon, LED, Espelho, Vidro, etc.); leitura de legenda de materiais com fabricante/padrão literal ("MDF Beton - Guararapes"); extração de ferragens com códigos (P170, P1145, Oslo Espia); iluminação com temperatura (3000K vs 4000K); instruções de fabricação/instalação; **classificação de confiança** (explicita/calculada/inferida/estimada/ilegivel, 0-100); **auditoria de consistência** (soma de cotas, cruzamento de vistas, inventário 3D). maxTokens por folha: **8192**. **Sem números de exemplo hardcoded**.
 
 **IA em produção**: usa **OpenAI padrão** (`OPENAI_API_KEY=sk-proj-...`, `OPENAI_MODEL` no `backend/.env`). As chaves da Azure existem no `.env` mas **ainda não são usadas** por este controller (ver prompt de melhoria Azure).
 
@@ -68,3 +68,4 @@ Filosofia: **compreender → modelar (Digital Twin paramétrico) → renderizar*
 - `be82554` — upgrade das 3 abas de Projects (cálculo real).
 - `9a9d394` — detecção de portas + fix do loop do 3D. `eebd3e7` — montagem 3D relativa (Antigravity).
 - `2bf5ea6` — Azure Document Intelligence + retry 429. `aae7316` — Digital Twin (backend). `b2c4698` — renderizador Three.js.
+- `f5a8462` — **Upgrade do prompt para Especialista Sênior** (22 regras, classificação de confiança, ferragens, iluminação, fabricação, auditoria, maxTokens 8192) (Antigravity).
