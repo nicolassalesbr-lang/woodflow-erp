@@ -211,6 +211,7 @@ export default function ThreeViewer({ project }: Props) {
   const stateRef = useRef<any>({});
   const [ready, setReady] = useState(false);
   const [envFilter, setEnvFilter] = useState<string>("all");
+  const [furnitureFilter, setFurnitureFilter] = useState<string>("all");
   const [doorOpen, setDoorOpen] = useState(0);
   const [explode, setExplode] = useState(0);
   const [isolate, setIsolate] = useState<string>("all");
@@ -222,6 +223,17 @@ export default function ThreeViewer({ project }: Props) {
     () => (twin?.environments || []).map((e: any) => e.name),
     [twin],
   );
+  const furnitureList: { id: string; name: string; env: string }[] = useMemo(() => {
+    const list: { id: string; name: string; env: string }[] = [];
+    (twin?.environments || []).forEach((env: any) => {
+      (env.furnitures || []).forEach((f: any) => {
+        if (envFilter === "all" || env.name === envFilter) {
+          list.push({ id: f.id || f.name, name: f.name || f.id || 'Móvel', env: env.name });
+        }
+      });
+    });
+    return list;
+  }, [twin, envFilter]);
   const stats = twin?.audit?.stats;
   const warnings: string[] = twin?.audit?.warnings || [];
 
@@ -321,7 +333,11 @@ export default function ThreeViewer({ project }: Props) {
     const envs = (twin.environments || []).filter((e: any) => envFilter === "all" || e.name === envFilter);
     envs.forEach((env: any) => {
       (env.furnitures || []).forEach((f: any) => {
+        const fId = f.id || f.name;
+        if (furnitureFilter !== "all" && fId !== furnitureFilter) return;
         const g = buildFurniture(f);
+        g.userData.furnitureId = fId;
+        g.userData.furnitureName = f.name || f.id || 'Móvel';
         const p = f.position || {};
         g.position.set((p.x || 0) * S, (p.y || 0) * S, (p.z || 0) * S);
         g.rotation.y = ((f.rotation?.y || 0) * Math.PI) / 180;
@@ -343,7 +359,7 @@ export default function ThreeViewer({ project }: Props) {
       controls.target.copy(center);
       controls.update();
     }
-  }, [twin, envFilter]);
+  }, [twin, envFilter, furnitureFilter]);
 
   // Aplica portas/gavetas, explosão e isolamento
   useEffect(() => {
@@ -351,7 +367,7 @@ export default function ThreeViewer({ project }: Props) {
     if (!st?.root) return;
     st.root.traverse((obj: any) => {
       const k = obj.userData?.kind;
-      if (k === "door-giro") obj.rotation.y = obj.userData.sign * doorOpen * (Math.PI / 2);
+      if (k === "door-giro") obj.rotation.y = -obj.userData.sign * doorOpen * (Math.PI / 2);
       else if (k === "door-correr") obj.position.x = (obj.userData.dir * obj.userData.travel * doorOpen) * S;
       else if (k === "drawer") obj.position.z = doorOpen * 0.4;
       // explosão radial simples por grupo de móvel
@@ -455,9 +471,17 @@ export default function ThreeViewer({ project }: Props) {
 
         <div>
           <label className="mb-1.5 block text-xs text-[#bba890]">Ambiente</label>
-          <select value={envFilter} onChange={(e) => setEnvFilter(e.target.value)} className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-3 py-2 text-xs text-[#fff8f0] outline-none">
+          <select value={envFilter} onChange={(e) => { setEnvFilter(e.target.value); setFurnitureFilter("all"); }} className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-3 py-2 text-xs text-[#fff8f0] outline-none">
             <option value="all">Projeto completo</option>
             {environments.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-xs text-[#bba890]">Móvel</label>
+          <select value={furnitureFilter} onChange={(e) => setFurnitureFilter(e.target.value)} className="w-full rounded-lg border border-[#e8d4b8]/10 bg-[#18120d] px-3 py-2 text-xs text-[#fff8f0] outline-none">
+            <option value="all">Todos os móveis</option>
+            {furnitureList.map((f) => <option key={f.id} value={f.id}>{f.name}{envFilter === "all" ? ` (${f.env})` : ''}</option>)}
           </select>
         </div>
 
