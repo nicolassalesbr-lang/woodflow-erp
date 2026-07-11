@@ -127,17 +127,6 @@ export class ProjectController {
     const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
     const model = process.env.OPENAI_MODEL || 'gpt-4o';
 
-    if (standardKey) {
-      return {
-        apiUrl: 'https://api.openai.com/v1/chat/completions',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${standardKey}`,
-        },
-        model,
-      };
-    }
-
     if (azureKey && azureEndpoint) {
       const cleanEndpoint = azureEndpoint.endsWith('/') ? azureEndpoint.slice(0, -1) : azureEndpoint;
       const deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4o';
@@ -148,6 +137,17 @@ export class ProjectController {
           'api-key': azureKey,
         },
         // Azure carries the deployment in the URL, so no model field in the body.
+      };
+    }
+
+    if (standardKey) {
+      return {
+        apiUrl: 'https://api.openai.com/v1/chat/completions',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${standardKey}`,
+        },
+        model,
       };
     }
 
