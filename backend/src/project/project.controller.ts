@@ -234,6 +234,7 @@ REGRAS FUNDAMENTAIS (22 regras — siga TODAS rigorosamente)
 20. Verifique se a soma das cotas parciais bate com a medida total. Se não bater, registre o conflito.
 21. Verifique se a quantidade de portas, gavetas, nichos e prateleiras coincide entre vista frontal, interna e 3D.
 22. Se um móvel aparecer na perspectiva 3D mas não tiver cotas em nenhuma vista técnica, registre-o com classificacao "estimada" e confianca baixa.
+23. NÃO DUPLIQUE (crítico p/ consistência): a MESMA peça física aparece em várias vistas (frontal, interna, corte, 3D) da folha — conte-a UMA ÚNICA VEZ, não uma por vista. Para peças repetidas idênticas (ex.: "3 prateleiras iguais", "2 portas iguais"), use UM item com quantity = N — nunca N itens repetidos. Cada item = uma peça distinta OU um conjunto idêntico via quantity.
 
 ═══════════════════════════════════════════════════════════════════
 HIERARQUIA E TIPOS
@@ -662,6 +663,42 @@ Extraia APENAS o que está documentado nesta prancha. Não invente peças de out
     return out;
   }
 
+  /**
+   * Funde peças idênticas (mesmo ambiente + tipo + material + dimensões ~iguais)
+   * somando a quantidade. Corrige a super-contagem: a mesma peça aparece em várias
+   * vistas da folha e o modelo às vezes a lista repetida → aqui vira 1 item com qty.
+   */
+  private dedupeItems(items: any[]): any[] {
+    const map = new Map<string, any>();
+    for (const it of items) {
+      const key = [
+        (it.environment || '').toLowerCase().trim(),
+        (it.itemType || '').toLowerCase().trim(),
+        (it.materialType || '').toLowerCase().trim(),
+        Math.round((it.width || 0) / 10),   // tolerância de 1cm
+        Math.round((it.height || 0) / 10),
+        Math.round((it.depth || 0) / 10),
+      ].join('|');
+      const ex = map.get(key);
+      if (ex) {
+        ex.quantity += it.quantity || 1;
+        if ((it.description || '').length > (ex.description || '').length) ex.description = it.description;
+        if ((it.observacoes || '').length > (ex.observacoes || '').length) ex.observacoes = it.observacoes;
+        if (!ex.codigo && it.codigo) ex.codigo = it.codigo;
+        if (!ex.acabamento && it.acabamento) ex.acabamento = it.acabamento;
+      } else {
+        map.set(key, { ...it });
+      }
+    }
+    // Recalcula área/volume com a quantidade consolidada
+    const out = Array.from(map.values());
+    for (const m of out) {
+      m.area = +(((m.width * m.height) / 1_000_000) * m.quantity).toFixed(3);
+      m.volume = +(((m.width * m.height * m.thickness) / 1_000_000_000) * m.quantity).toFixed(4);
+    }
+    return out;
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   //  FASE SEMÂNTICA — DIGITAL TWIN (Ambiente → Móveis → Componentes → Ferragens)
   // ─────────────────────────────────────────────────────────────────────────
@@ -890,12 +927,20 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
       });
 
       // CAMADA 2: analisa cada folha em paralelo (imagem + contexto estruturado).
+      // Retry de completude: folha que volta vazia é reprocessada 1x (evita perder folhas).
       let rawItems: any[] = [];
       if (pageImages.length > 0) {
         const perPage = await this.runPool(
           pageImages,
           VISION_CONCURRENCY,
-          (img, idx) => this.analyzePage(cfg, img, idx, pageImages.length, pageContexts[idx]),
+          async (img, idx) => {
+            let items = await this.analyzePage(cfg, img, idx, pageImages.length, pageContexts[idx]);
+            if (items.length === 0) {
+              console.warn(`[AI Reader] Folha ${idx + 1} vazia — retry de completude.`);
+              items = await this.analyzePage(cfg, img, idx, pageImages.length, pageContexts[idx]);
+            }
+            return items;
+          },
         );
         rawItems = perPage.flat();
       }
@@ -913,7 +958,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
         rawItems = this.extractItemsFromContent(await this.callVision(cfg, messages, 8192));
       }
 
-      sanitized = this.sanitizeItems(rawItems);
+      sanitized = this.dedupeItems(this.sanitizeItems(rawItems));
       isRealParsing = sanitized.length > 0;
       console.log(`[AI Reader] Aggregated ${rawItems.length} raw → ${sanitized.length} sanitized item(s).`);
     } catch (err: any) {
