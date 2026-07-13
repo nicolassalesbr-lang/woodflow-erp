@@ -746,11 +746,32 @@ Extraia APENAS o que está documentado nesta prancha. Não invente peças de out
    * somando a quantidade. Corrige a super-contagem: a mesma peça aparece em várias
    * vistas da folha e o modelo às vezes a lista repetida → aqui vira 1 item com qty.
    */
+  /** Normaliza texto p/ chave: minúsculas, sem acentos, espaços colapsados. */
+  private normKey(s: string): string {
+    return (s || '')
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   private dedupeItems(items: any[]): any[] {
+    // Canoniza nomes de ambiente: "AREA INTIMA" e "Área Íntima" viram o mesmo
+    // (vence a primeira grafia com acentos/caixa mista encontrada)
+    const envCanon = new Map<string, string>();
+    for (const it of items) {
+      const k = this.normKey(it.environment);
+      const cur = envCanon.get(k);
+      const cand = String(it.environment || 'Ambiente').trim();
+      if (!cur || (/[a-zà-ÿ]/.test(cand) && !/[a-zà-ÿ]/.test(cur))) envCanon.set(k, cand);
+    }
+    for (const it of items) it.environment = envCanon.get(this.normKey(it.environment)) || it.environment;
+
     const map = new Map<string, any>();
     for (const it of items) {
       const key = [
-        (it.environment || '').toLowerCase().trim(),
+        this.normKey(it.environment),
         (it.itemType || '').toLowerCase().trim(),
         (it.materialType || '').toLowerCase().trim(),
         Math.round((it.width || 0) / 10),   // tolerância de 1cm
@@ -888,29 +909,85 @@ Retorne SOMENTE um objeto JSON puro (sem markdown, sem crases, sem texto fora do
 Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique a geometria. Se um móvel possui múltiplos materiais ou camadas em Z, modele como componentes independentes detalhados.`;
   }
 
-  /** Monta o Digital Twin a partir das peças agrupadas por ambiente (1 chamada LLM). */
+  /**
+   * Parse tolerante de JSON vindo do LLM: remove cercas de markdown, extrai o bloco
+   * {…} mais externo e tenta reparos comuns (vírgulas penduradas, truncamento).
+   */
+  private tryParseJsonLoose(content: string): any | null {
+    let clean = content.trim();
+    if (clean.startsWith('```json')) clean = clean.slice(7);
+    if (clean.startsWith('```')) clean = clean.slice(3);
+    if (clean.endsWith('```')) clean = clean.slice(0, -3);
+    clean = clean.trim();
+
+    const attempts: string[] = [clean];
+    // Bloco { … } mais externo (descarta texto antes/depois)
+    const first = clean.indexOf('{');
+    const last = clean.lastIndexOf('}');
+    if (first >= 0 && last > first) attempts.push(clean.slice(first, last + 1));
+    // Reparo: vírgulas penduradas antes de } ou ]
+    attempts.push(...attempts.map((a) => a.replace(/,\s*([}\]])/g, '$1')));
+
+    for (const a of attempts) {
+      try { return JSON.parse(a); } catch { /* tenta o próximo */ }
+    }
+    return null;
+  }
+
+  /** Monta o Digital Twin a partir das peças agrupadas por ambiente (retry 1x se JSON inválido). */
   private async assembleDigitalTwin(cfg: VisionConfig, itemsByEnv: Record<string, any[]>): Promise<any | null> {
     const payload = JSON.stringify(itemsByEnv);
-    const messages = [
-      { role: 'system', content: this.buildTwinPrompt() },
-      { role: 'user', content: `PEÇAS EXTRAÍDAS (por ambiente):\n${payload.slice(0, 30000)}\n\nReconstrua o Digital Twin paramétrico completo.` },
-    ];
-    const content = await this.callVision(cfg, messages, 12000);
-    if (!content) return null;
-    try {
-      let clean = content.trim();
-      if (clean.startsWith('```json')) clean = clean.slice(7);
-      if (clean.startsWith('```')) clean = clean.slice(3);
-      if (clean.endsWith('```')) clean = clean.slice(0, -3);
-      const twin = JSON.parse(clean.trim());
-      const envs = twin.environments?.length || 0;
-      const furns = (twin.environments || []).reduce((s: number, e: any) => s + (e.furnitures?.length || 0), 0);
-      console.log(`[Twin] Digital Twin montado: ${envs} ambiente(s), ${furns} móvel(is).`);
-      return twin;
-    } catch (err) {
-      console.warn('[Twin] JSON inválido do montador:', err);
-      return null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const messages = [
+        { role: 'system', content: this.buildTwinPrompt() },
+        {
+          role: 'user',
+          content:
+            `PEÇAS EXTRAÍDAS (por ambiente):\n${payload.slice(0, 30000)}\n\nReconstrua o Digital Twin paramétrico completo.` +
+            (attempt > 0 ? '\n\nATENÇÃO: a tentativa anterior retornou JSON INVÁLIDO. Retorne SOMENTE JSON estritamente válido (RFC 8259), sem comentários nem texto fora do objeto.' : ''),
+        },
+      ];
+      const content = await this.callVision(cfg, messages, 12000);
+      if (!content) continue;
+      const twin = this.tryParseJsonLoose(content);
+      if (twin && Array.isArray(twin.environments)) {
+        const envs = twin.environments.length;
+        const furns = twin.environments.reduce((s: number, e: any) => s + (e.furnitures?.length || 0), 0);
+        console.log(`[Twin] Digital Twin montado: ${envs} ambiente(s), ${furns} móvel(is).`);
+        return twin;
+      }
+      console.warn(`[Twin] JSON inválido do montador (tentativa ${attempt + 1}/2).`);
     }
+    return null;
+  }
+
+  /** Reconstrói só o Digital Twin a partir dos itens já salvos (sem reprocessar o PDF). */
+  @Post(':id/twin')
+  async rebuildTwin(@Headers('authorization') authHeader: string, @Param('id') id: string) {
+    const tenantId = this.verifyTokenAndGetTenantId(authHeader);
+    const project = await this.prisma.project.findFirst({
+      where: { id, tenantId },
+      include: { items: true },
+    });
+    if (!project) throw new HttpException('Project not found', HttpStatus.NOT_FOUND);
+    if (!project.items.length) throw new HttpException('Projeto sem peças extraídas', HttpStatus.UNPROCESSABLE_ENTITY);
+
+    const cfg = this.getVisionConfig();
+    if (!cfg) throw new HttpException('Motor de IA não configurado', HttpStatus.SERVICE_UNAVAILABLE);
+
+    const byEnv: Record<string, any[]> = {};
+    for (const it of project.items) {
+      (byEnv[it.environment] = byEnv[it.environment] || []).push({
+        itemType: it.itemType, description: it.description, codigo: it.codigo,
+        width: it.width, height: it.height, depth: it.depth, thickness: it.thickness,
+        quantity: it.quantity, materialType: it.materialType, cor: it.cor,
+        acabamento: it.acabamento, observacoes: it.observacoes,
+      });
+    }
+    const twin = await this.assembleDigitalTwin(cfg, byEnv);
+    if (!twin) throw new HttpException('Falha ao montar o Digital Twin', HttpStatus.BAD_GATEWAY);
+    await this.prisma.project.update({ where: { id }, data: { digitalTwin: twin } });
+    return { success: true, stats: twin.audit?.stats || null };
   }
 
   // ─────────────────────────────────────────────────────────────────────────
