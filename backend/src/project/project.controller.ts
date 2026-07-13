@@ -405,6 +405,13 @@ Extraia APENAS o que está documentado nesta prancha. Não invente peças de out
       requestBody.response_format = { type: 'json_object' };
     }
 
+    // Provedor já marcado como morto nesta sessão → troca antes mesmo de tentar
+    if (this.deadProviders.has(cfg.apiUrl)) {
+      const alive = this.getVisionConfig();
+      if (!alive) return null;
+      if (alive.apiUrl !== cfg.apiUrl) return this.callVision(alive, messages, maxTokens, attempt);
+    }
+
     try {
       const response = await fetch(cfg.apiUrl, {
         method: 'POST',
