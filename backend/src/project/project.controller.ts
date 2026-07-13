@@ -20,6 +20,7 @@ interface VisionConfig {
   apiUrl: string;
   headers: Record<string, string>;
   model?: string;
+  name?: string;
 }
 
 @Controller('projects')
@@ -120,24 +121,58 @@ export class ProjectController {
   //  VISION / LLM
   // ─────────────────────────────────────────────────────────────────────────
 
-  /** Resolve which API (Standard OpenAI or Azure OpenAI) to use, or null if unconfigured. */
+  /**
+   * Provedores com quota esgotada/credencial inválida nesta sessão do processo.
+   * Um provedor morto é pulado até o próximo restart do PM2.
+   */
+  private deadProviders = new Set<string>();
+
+  /**
+   * Lista ordenada de provedores Vision disponíveis (OpenAI padrão e/ou Azure).
+   * VISION_PROVIDER=azure inverte a prioridade. O failover em callVision pula
+   * automaticamente para o próximo quando um deles fica sem quota.
+   */
+  private getVisionConfigs(): VisionConfig[] {
+    const configs: VisionConfig[] = [];
+    const openai = this.buildOpenAIConfig();
+    const azure = this.buildAzureConfig();
+    if ((process.env.VISION_PROVIDER || '').toLowerCase() === 'azure') {
+      if (azure) configs.push(azure);
+      if (openai) configs.push(openai);
+    } else {
+      if (openai) configs.push(openai);
+      if (azure) configs.push(azure);
+    }
+    return configs;
+  }
+
+  /** Primeiro provedor vivo (compatibilidade com os chamadores existentes). */
   private getVisionConfig(): VisionConfig | null {
+    const alive = this.getVisionConfigs().filter((c) => !this.deadProviders.has(c.apiUrl));
+    if (!alive.length) {
+      console.warn('[AI Reader] Nenhum provedor Vision disponível (sem chave ou todos sem quota).');
+      return null;
+    }
+    return alive[0];
+  }
+
+  private buildOpenAIConfig(): VisionConfig | null {
     const standardKey = process.env.OPENAI_API_KEY;
+    if (!standardKey) return null;
+    return {
+      apiUrl: 'https://api.openai.com/v1/chat/completions',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${standardKey}`,
+      },
+      model: process.env.OPENAI_MODEL || 'gpt-4o',
+      name: 'OpenAI',
+    };
+  }
+
+  private buildAzureConfig(): VisionConfig | null {
     const azureKey = process.env.AZURE_OPENAI_API_KEY;
     const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
-    const model = process.env.OPENAI_MODEL || 'gpt-4o';
-
-    if (standardKey) {
-      return {
-        apiUrl: 'https://api.openai.com/v1/chat/completions',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${standardKey}`,
-        },
-        model,
-      };
-    }
-
     if (azureKey && azureEndpoint) {
       const cleanEndpoint = azureEndpoint.trim();
 
@@ -158,6 +193,7 @@ export class ProjectController {
             'api-key': azureKey,
           },
           model: deploymentName, // Necessário enviar no body no gateway da Azure AI
+          name: 'Azure',
         };
       }
 
@@ -170,10 +206,10 @@ export class ProjectController {
           'Content-Type': 'application/json',
           'api-key': azureKey,
         },
+        name: 'Azure',
       };
     }
 
-    console.warn('[AI Reader] No OpenAI/Azure key configured.');
     return null;
   }
 
@@ -356,8 +392,10 @@ Extraia APENAS o que está documentado nesta prancha. Não invente peças de out
     if (cfg.model) requestBody.model = cfg.model;
 
     if (isNewModel) {
-      requestBody.max_completion_tokens = maxTokens;
-      // Novos modelos (como gpt-5/o1/o3) não suportam temperatura customizada e costumam retornar vazio se response_format json_object for forçado
+      // Modelos de reasoning (gpt-5/o1/o3) consomem tokens em raciocínio ANTES da
+      // resposta — sem folga o JSON sai truncado/vazio (finish_reason=length).
+      requestBody.max_completion_tokens = maxTokens + 8000;
+      // Também não suportam temperatura customizada e retornam vazio com response_format forçado
     } else {
       requestBody.max_tokens = maxTokens;
       requestBody.temperature = 0;
@@ -371,15 +409,45 @@ Extraia APENAS o que está documentado nesta prancha. Não invente peças de out
         body: JSON.stringify(requestBody),
       });
 
-      // Rate limit / indisponibilidade temporária → retry com backoff exponencial
-      if ((response.status === 429 || response.status === 503) && attempt < 5) {
-        const retryAfter = Number(response.headers.get('retry-after'));
-        const waitMs = retryAfter > 0
-          ? retryAfter * 1000
-          : Math.min(3000 * Math.pow(2, attempt), 30000);
-        console.warn(`[AI Reader] ${response.status} rate limit — retry em ${waitMs}ms (tentativa ${attempt + 1}/5)`);
-        await new Promise((r) => setTimeout(r, waitMs));
-        return this.callVision(cfg, messages, maxTokens, attempt + 1);
+      // 429/503: diferenciar quota ESGOTADA (permanente) de rate limit temporário
+      if (response.status === 429 || response.status === 503) {
+        const errBody = await response.text();
+
+        // Quota esgotada ou credencial inválida → FAILOVER imediato para o próximo provedor
+        if (/insufficient_quota|billing|account is not active/i.test(errBody)) {
+          this.deadProviders.add(cfg.apiUrl);
+          const next = this.getVisionConfig();
+          if (next && next.apiUrl !== cfg.apiUrl) {
+            console.warn(`[AI Reader] ${cfg.name || 'provedor'} SEM QUOTA — failover para ${next.name || 'alternativo'}.`);
+            return this.callVision(next, messages, maxTokens, 0);
+          }
+          console.error('[AI Reader] Quota esgotada e nenhum provedor alternativo configurado.');
+          return null;
+        }
+
+        // Rate limit temporário → retry com backoff exponencial
+        if (attempt < 5) {
+          const retryAfter = Number(response.headers.get('retry-after'));
+          const waitMs = retryAfter > 0
+            ? retryAfter * 1000
+            : Math.min(3000 * Math.pow(2, attempt), 30000);
+          console.warn(`[AI Reader] ${response.status} rate limit (${cfg.name}) — retry em ${waitMs}ms (tentativa ${attempt + 1}/5)`);
+          await new Promise((r) => setTimeout(r, waitMs));
+          return this.callVision(cfg, messages, maxTokens, attempt + 1);
+        }
+        console.error('[AI Reader] Rate limit persistente após 5 tentativas:', errBody.substring(0, 200));
+        return null;
+      }
+
+      // 401/403: credencial inválida → failover
+      if (response.status === 401 || response.status === 403) {
+        this.deadProviders.add(cfg.apiUrl);
+        const next = this.getVisionConfig();
+        if (next && next.apiUrl !== cfg.apiUrl) {
+          console.warn(`[AI Reader] ${cfg.name || 'provedor'} credencial inválida (${response.status}) — failover para ${next.name}.`);
+          return this.callVision(next, messages, maxTokens, 0);
+        }
+        return null;
       }
 
       if (!response.ok) {
