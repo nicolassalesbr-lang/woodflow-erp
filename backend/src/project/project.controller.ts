@@ -952,7 +952,8 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
             (attempt > 0 ? '\n\nATENÇÃO: a tentativa anterior retornou JSON INVÁLIDO. Retorne SOMENTE JSON estritamente válido (RFC 8259), sem comentários nem texto fora do objeto.' : ''),
         },
       ];
-      const content = await this.callVision(cfg, messages, 12000);
+      // 28k de saída: um twin de 7 ambientes/130+ componentes gera 15-25k tokens de JSON
+      const content = await this.callVision(cfg, messages, 28000);
       if (!content) continue;
       const twin = this.tryParseJsonLoose(content);
       if (twin && Array.isArray(twin.environments)) {
