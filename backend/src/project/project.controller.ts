@@ -946,7 +946,9 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
         {
           role: 'user',
           content:
-            `PEÇAS EXTRAÍDAS (por ambiente):\n${payload.slice(0, 30000)}\n\nReconstrua o Digital Twin paramétrico completo.` +
+            // 120k chars ≈ 30k tokens — o gpt-5 comporta; 30k chars cortava ambientes
+            // inteiros agora que a extração é mais rica (134+ itens)
+            `PEÇAS EXTRAÍDAS (por ambiente):\n${payload.slice(0, 120000)}\n\nReconstrua o Digital Twin paramétrico completo.` +
             (attempt > 0 ? '\n\nATENÇÃO: a tentativa anterior retornou JSON INVÁLIDO. Retorne SOMENTE JSON estritamente válido (RFC 8259), sem comentários nem texto fora do objeto.' : ''),
         },
       ];
