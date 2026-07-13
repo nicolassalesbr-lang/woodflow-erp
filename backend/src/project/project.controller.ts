@@ -398,7 +398,10 @@ Extraia APENAS o que está documentado nesta prancha. Não invente peças de out
       // reasoning_effort low: corta a latência de ~3min para segundos por folha
       // sem comprometer a leitura de cotas (a extração é visual, não lógica-profunda)
       requestBody.reasoning_effort = process.env.VISION_REASONING_EFFORT || 'low';
-      // Também não suportam temperatura customizada e retornam vazio com response_format forçado
+      // json_object FUNCIONA no gpt-5 via chat/completions (validado); o problema
+      // antigo era só no endpoint /responses. Garante JSON válido (twin quebrava sem isso).
+      requestBody.response_format = { type: 'json_object' };
+      // Sem temperature: modelos de reasoning não aceitam valor customizado
     } else {
       requestBody.max_tokens = maxTokens;
       requestBody.temperature = 0;
