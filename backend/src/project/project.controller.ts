@@ -1084,6 +1084,12 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
 
     const uniqueEnvironments = Array.from(new Set(items.map((i) => i.environment)));
 
+    // 0 itens extraídos NÃO é sucesso: marca FAILED com causa clara (ex.: IA sem quota)
+    // em vez de COMPLETED vazio silencioso.
+    if (!parseError && items.length === 0) {
+      parseError = 'Nenhuma peça extraída do PDF — verifique os créditos/configuração do provedor de IA e reprocesse.';
+    }
+
     // FASE SEMÂNTICA: monta o Digital Twin paramétrico a partir das peças salvas.
     let digitalTwin: any = null;
     if (!parseError && items.length > 0) {
