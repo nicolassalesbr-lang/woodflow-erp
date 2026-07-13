@@ -17,6 +17,8 @@ import { getApiUrl } from '../../utils/api';
 interface Budget {
   id: string;
   projectId: string;
+  pricingMethod?: string;
+  sqmValue?: number;
   totalMdfSheets: number;
   totalHardwareCost: number;
   totalLaborCost: number;
@@ -27,11 +29,23 @@ interface Budget {
   taxPercent: number;
   finalPrice: number;
   version: number;
+  sqmItemsDetail?: Array<{
+    name: string;
+    environment: string;
+    type: string;
+    width: number;
+    height: number;
+    depth: number;
+    area: number;
+    price: number;
+  }>;
 }
 
 export default function BudgetScreen() {
   const [budget, setBudget] = useState<Budget | null>(null);
   const [params, setParams] = useState({
+    pricingMethod: 'COST',
+    sqmValue: 1700.0,
     markup: 1.6,
     margin: 32.0,
     commission: 5.0,
@@ -57,24 +71,43 @@ export default function BudgetScreen() {
       setBudget(data);
     } catch {
       // Offline mock calculation
-      const sheetsCost = 6 * 280.0; // 6 sheets * R$280
-      const rawCost = sheetsCost + 240.0 + 350.0; // sheets + hardware + labor
-      const ratio = 1 - (params.margin / 100) - (params.commission / 100) - (params.taxPercent / 100);
-      const finalPrice = rawCost * params.markup / (ratio > 0.1 ? ratio : 0.5);
+      let finalPrice = 0;
+      let sqmItemsDetail: any[] = [];
+      
+      if (params.pricingMethod === 'SQM') {
+        const mockItems = [
+          { name: 'Gabinete Pia', environment: 'Cozinha', type: 'balcao', width: 1200, height: 800, depth: 600, area: 0.96, price: 0.96 * params.sqmValue },
+          { name: 'Armário Aéreo', environment: 'Cozinha', type: 'aereo', width: 2370, height: 330, depth: 410, area: 0.78, price: 0.78 * params.sqmValue },
+          { name: 'Cabeceira', environment: 'Suíte', type: 'cabeceira', width: 1320, height: 930, depth: 50, area: 1.23, price: 1.23 * params.sqmValue }
+        ];
+        sqmItemsDetail = mockItems;
+        const totalArea = mockItems.reduce((sum, item) => sum + item.area, 0);
+        const basePrice = totalArea * params.sqmValue;
+        const ratio = 1 - (params.commission / 100) - (params.taxPercent / 100);
+        finalPrice = basePrice / (ratio > 0.1 ? ratio : 0.5);
+      } else {
+        const sheetsCost = 6 * 280.0;
+        const rawCost = sheetsCost + 240.0 + 350.0;
+        const ratio = 1 - (params.margin / 100) - (params.commission / 100) - (params.taxPercent / 100);
+        finalPrice = rawCost * params.markup / (ratio > 0.1 ? ratio : 0.5);
+      }
 
       setBudget({
         id: 'mock-b-1',
         projectId: 'proj-1',
-        totalMdfSheets: 6,
-        totalHardwareCost: 240.0,
-        totalLaborCost: 350.0,
+        pricingMethod: params.pricingMethod,
+        sqmValue: params.sqmValue,
+        totalMdfSheets: params.pricingMethod === 'SQM' ? 0 : 6,
+        totalHardwareCost: params.pricingMethod === 'SQM' ? 0 : 240.0,
+        totalLaborCost: params.pricingMethod === 'SQM' ? 0 : 350.0,
         wastePercent: params.wastePercent,
         markup: params.markup,
         margin: params.margin,
         commission: params.commission,
         taxPercent: params.taxPercent,
         finalPrice: Math.round(finalPrice * 100) / 100,
-        version: 1
+        version: 1,
+        sqmItemsDetail
       });
     } finally {
       setLoading(false);
@@ -142,60 +175,120 @@ export default function BudgetScreen() {
         <div className="lg:col-span-1 glass p-6 md:p-8 rounded-2xl space-y-6">
           <div className="flex items-center gap-2 mb-2">
             <Settings className="w-5 h-5 text-gray-400" />
-            <h3 className="text-base font-bold text-white tracking-tight">Markup & Margens</h3>
+            <h3 className="text-base font-bold text-white tracking-tight">Configurações de Preço</h3>
+          </div>
+
+          {/* Pricing Method Toggle */}
+          <div className="grid grid-cols-2 gap-2 bg-gray-900/60 p-1.5 rounded-xl border border-border">
+            <button
+              onClick={() => setParams({ ...params, pricingMethod: 'COST' })}
+              className={`py-2 text-[10px] font-bold rounded-lg transition-all ${
+                params.pricingMethod === 'COST'
+                  ? 'bg-emerald-500 text-background font-extrabold shadow'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Custo Detalhado
+            </button>
+            <button
+              onClick={() => setParams({ ...params, pricingMethod: 'SQM' })}
+              className={`py-2 text-[10px] font-bold rounded-lg transition-all ${
+                params.pricingMethod === 'SQM'
+                  ? 'bg-emerald-500 text-background font-extrabold shadow'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Metro Quadrado (m²)
+            </button>
           </div>
 
           <div className="space-y-4 text-xs font-semibold text-gray-400">
-            <div>
-              <label className="block mb-1">Markup (Multiplicador de Custo)</label>
-              <input 
-                type="number" 
-                step="0.1" 
-                value={params.markup}
-                onChange={(e) => setParams({ ...params, markup: parseFloat(e.target.value) || 1.0 })}
-                className="w-full py-2.5 px-4 rounded-xl bg-gray-900/60 border border-border text-sm text-white focus:outline-none"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block mb-1">Margem de Lucro (%)</label>
-                <input 
-                  type="number" 
-                  value={params.margin}
-                  onChange={(e) => setParams({ ...params, margin: parseFloat(e.target.value) || 0 })}
-                  className="w-full py-2.5 px-4 rounded-xl bg-gray-900/60 border border-border text-sm text-white focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="block mb-1">Desperdício (%)</label>
-                <input 
-                  type="number" 
-                  value={params.wastePercent}
-                  onChange={(e) => setParams({ ...params, wastePercent: parseFloat(e.target.value) || 0 })}
-                  className="w-full py-2.5 px-4 rounded-xl bg-gray-900/60 border border-border text-sm text-white focus:outline-none"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block mb-1">Comissão (%)</label>
-                <input 
-                  type="number" 
-                  value={params.commission}
-                  onChange={(e) => setParams({ ...params, commission: parseFloat(e.target.value) || 0 })}
-                  className="w-full py-2.5 px-4 rounded-xl bg-gray-900/60 border border-border text-sm text-white focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="block mb-1">Impostos (%)</label>
-                <input 
-                  type="number" 
-                  value={params.taxPercent}
-                  onChange={(e) => setParams({ ...params, taxPercent: parseFloat(e.target.value) || 0 })}
-                  className="w-full py-2.5 px-4 rounded-xl bg-gray-900/60 border border-border text-sm text-white focus:outline-none"
-                />
-              </div>
-            </div>
+            {params.pricingMethod === 'SQM' ? (
+              <>
+                <div>
+                  <label className="block mb-1">Valor por m² (R$/m²)</label>
+                  <input 
+                    type="number" 
+                    value={params.sqmValue}
+                    onChange={(e) => setParams({ ...params, sqmValue: parseFloat(e.target.value) || 0 })}
+                    className="w-full py-2.5 px-4 rounded-xl bg-gray-900/60 border border-border text-sm text-white focus:outline-none"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block mb-1">Comissão (%)</label>
+                    <input 
+                      type="number" 
+                      value={params.commission}
+                      onChange={(e) => setParams({ ...params, commission: parseFloat(e.target.value) || 0 })}
+                      className="w-full py-2.5 px-4 rounded-xl bg-gray-900/60 border border-border text-sm text-white focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1">Impostos (%)</label>
+                    <input 
+                      type="number" 
+                      value={params.taxPercent}
+                      onChange={(e) => setParams({ ...params, taxPercent: parseFloat(e.target.value) || 0 })}
+                      className="w-full py-2.5 px-4 rounded-xl bg-gray-900/60 border border-border text-sm text-white focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <label className="block mb-1">Markup (Multiplicador de Custo)</label>
+                  <input 
+                    type="number" 
+                    step="0.1" 
+                    value={params.markup}
+                    onChange={(e) => setParams({ ...params, markup: parseFloat(e.target.value) || 1.0 })}
+                    className="w-full py-2.5 px-4 rounded-xl bg-gray-900/60 border border-border text-sm text-white focus:outline-none"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block mb-1">Margem de Lucro (%)</label>
+                    <input 
+                      type="number" 
+                      value={params.margin}
+                      onChange={(e) => setParams({ ...params, margin: parseFloat(e.target.value) || 0 })}
+                      className="w-full py-2.5 px-4 rounded-xl bg-gray-900/60 border border-border text-sm text-white focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1">Desperdício (%)</label>
+                    <input 
+                      type="number" 
+                      value={params.wastePercent}
+                      onChange={(e) => setParams({ ...params, wastePercent: parseFloat(e.target.value) || 0 })}
+                      className="w-full py-2.5 px-4 rounded-xl bg-gray-900/60 border border-border text-sm text-white focus:outline-none"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block mb-1">Comissão (%)</label>
+                    <input 
+                      type="number" 
+                      value={params.commission}
+                      onChange={(e) => setParams({ ...params, commission: parseFloat(e.target.value) || 0 })}
+                      className="w-full py-2.5 px-4 rounded-xl bg-gray-900/60 border border-border text-sm text-white focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1">Impostos (%)</label>
+                    <input 
+                      type="number" 
+                      value={params.taxPercent}
+                      onChange={(e) => setParams({ ...params, taxPercent: parseFloat(e.target.value) || 0 })}
+                      className="w-full py-2.5 px-4 rounded-xl bg-gray-900/60 border border-border text-sm text-white focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
 
             <button 
               onClick={calculateBudget}
@@ -215,28 +308,66 @@ export default function BudgetScreen() {
                 
                 {/* Cost breakup list */}
                 <div className="space-y-6">
-                  <div>
-                    <h3 className="text-base font-bold text-white tracking-tight">Detalhamento dos Custos</h3>
-                    <p className="text-xs text-gray-400 mt-1">Valores calculados com base no projeto analisado.</p>
-                  </div>
+                  {budget.pricingMethod === 'SQM' ? (
+                    <>
+                      <div>
+                        <h3 className="text-base font-bold text-white tracking-tight">Detalhamento dos Móveis (m²)</h3>
+                        <p className="text-xs text-gray-400 mt-1">Lista de móveis principais identificados no Digital Twin e calculados.</p>
+                      </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="p-4 rounded-xl bg-gray-900/40 border border-border flex flex-col justify-between">
-                      <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">MDF Chapas</span>
-                      <h4 className="text-xl font-bold text-white mt-1">{(budget.totalMdfSheets || 0)} chapas</h4>
-                      <span className="text-[10px] text-gray-400 mt-1">Est. R$ {((budget.totalMdfSheets || 0) * 280).toLocaleString('pt-BR')}</span>
-                    </div>
-                    <div className="p-4 rounded-xl bg-gray-900/40 border border-border flex flex-col justify-between">
-                      <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Acessórios / Ferragens</span>
-                      <h4 className="text-xl font-bold text-white mt-1">R$ {(budget.totalHardwareCost || 0).toLocaleString('pt-BR')}</h4>
-                      <span className="text-[10px] text-gray-400 mt-1">Dobradiças, corrediças, puxadores</span>
-                    </div>
-                    <div className="p-4 rounded-xl bg-gray-900/40 border border-border flex flex-col justify-between">
-                      <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Mão de obra</span>
-                      <h4 className="text-xl font-bold text-white mt-1">R$ {(budget.totalLaborCost || 0).toLocaleString('pt-BR')}</h4>
-                      <span className="text-[10px] text-gray-400 mt-1">Montagem e usinagem</span>
-                    </div>
-                  </div>
+                      {budget.sqmItemsDetail && budget.sqmItemsDetail.length > 0 ? (
+                        <div className="max-h-[30vh] overflow-y-auto pr-2 space-y-3 scrollbar-thin">
+                          {budget.sqmItemsDetail.map((item, idx) => (
+                            <div key={idx} className="p-4 rounded-xl bg-gray-900/40 border border-border flex items-center justify-between gap-4">
+                              <div className="flex flex-col gap-1">
+                                <span className="text-xs font-bold text-white">{item.name}</span>
+                                <span className="text-[10px] text-gray-400">
+                                  {item.environment} • {item.width}x{item.height}x{item.depth} mm
+                                </span>
+                              </div>
+                              <div className="text-right flex flex-col gap-0.5">
+                                <span className="text-sm font-extrabold text-emerald-400">
+                                  R$ {item.price.toLocaleString('pt-BR')}
+                                </span>
+                                <span className="text-[9px] text-gray-500 font-bold">
+                                  {item.area.toFixed(2)} m² (x R$ {budget.sqmValue})
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="p-4 rounded-xl bg-gray-900/40 border border-border text-center text-xs text-gray-500">
+                          Nenhum móvel principal detectado para cálculo por m².
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <h3 className="text-base font-bold text-white tracking-tight">Detalhamento dos Custos</h3>
+                        <p className="text-xs text-gray-400 mt-1">Valores calculados com base no projeto analisado.</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="p-4 rounded-xl bg-gray-900/40 border border-border flex flex-col justify-between">
+                          <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">MDF Chapas</span>
+                          <h4 className="text-xl font-bold text-white mt-1">{(budget.totalMdfSheets || 0)} chapas</h4>
+                          <span className="text-[10px] text-gray-400 mt-1">Est. R$ {((budget.totalMdfSheets || 0) * 280).toLocaleString('pt-BR')}</span>
+                        </div>
+                        <div className="p-4 rounded-xl bg-gray-900/40 border border-border flex flex-col justify-between">
+                          <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Acessórios / Ferragens</span>
+                          <h4 className="text-xl font-bold text-white mt-1">R$ {(budget.totalHardwareCost || 0).toLocaleString('pt-BR')}</h4>
+                          <span className="text-[10px] text-gray-400 mt-1">Dobradiças, corrediças, puxadores</span>
+                        </div>
+                        <div className="p-4 rounded-xl bg-gray-900/40 border border-border flex flex-col justify-between">
+                          <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Mão de obra</span>
+                          <h4 className="text-xl font-bold text-white mt-1">R$ {(budget.totalLaborCost || 0).toLocaleString('pt-BR')}</h4>
+                          <span className="text-[10px] text-gray-400 mt-1">Montagem e usinagem</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                   {/* Pricing glow box */}
                   <div className="p-6 rounded-2xl bg-gradient-to-tr from-emerald-950/20 to-cyan-950/20 border border-emerald-500/20 shadow-glow-emerald flex items-center justify-between">
@@ -250,7 +381,13 @@ export default function BudgetScreen() {
                     </div>
                     <div className="text-right text-xs text-gray-400 font-medium">
                       <span>Orçamento Versão v{budget.version || 1}</span>
-                      <p className="mt-1 font-semibold text-emerald-400">Margem líquida {budget.margin || 0}%</p>
+                      {budget.pricingMethod === 'SQM' ? (
+                        <p className="mt-1 font-semibold text-emerald-400">
+                          Método m² ({budget.sqmItemsDetail?.reduce((s, i) => s + i.area, 0).toFixed(2)}m² total)
+                        </p>
+                      ) : (
+                        <p className="mt-1 font-semibold text-emerald-400">Margem líquida {budget.margin || 0}%</p>
+                      )}
                     </div>
                   </div>
                 </div>
