@@ -937,34 +937,58 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
     return null;
   }
 
-  /** Monta o Digital Twin a partir das peças agrupadas por ambiente (retry 1x se JSON inválido). */
+  /**
+   * Monta o Digital Twin POR AMBIENTE (chamadas menores em paralelo) e agrega.
+   * Gerar o projeto inteiro numa única chamada truncava a saída (25k+ tokens)
+   * e cortava ambientes — por ambiente o payload e a resposta ficam pequenos.
+   */
   private async assembleDigitalTwin(cfg: VisionConfig, itemsByEnv: Record<string, any[]>): Promise<any | null> {
-    const payload = JSON.stringify(itemsByEnv);
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const messages = [
-        { role: 'system', content: this.buildTwinPrompt() },
-        {
-          role: 'user',
-          content:
-            // 120k chars ≈ 30k tokens — o gpt-5 comporta; 30k chars cortava ambientes
-            // inteiros agora que a extração é mais rica (134+ itens)
-            `PEÇAS EXTRAÍDAS (por ambiente):\n${payload.slice(0, 120000)}\n\nReconstrua o Digital Twin paramétrico completo.` +
-            (attempt > 0 ? '\n\nATENÇÃO: a tentativa anterior retornou JSON INVÁLIDO. Retorne SOMENTE JSON estritamente válido (RFC 8259), sem comentários nem texto fora do objeto.' : ''),
-        },
-      ];
-      // 28k de saída: um twin de 7 ambientes/130+ componentes gera 15-25k tokens de JSON
-      const content = await this.callVision(cfg, messages, 28000);
-      if (!content) continue;
-      const twin = this.tryParseJsonLoose(content);
-      if (twin && Array.isArray(twin.environments)) {
-        const envs = twin.environments.length;
-        const furns = twin.environments.reduce((s: number, e: any) => s + (e.furnitures?.length || 0), 0);
-        console.log(`[Twin] Digital Twin montado: ${envs} ambiente(s), ${furns} móvel(is).`);
-        return twin;
+    const envNames = Object.keys(itemsByEnv);
+    if (!envNames.length) return null;
+
+    const buildOneEnv = async (envName: string): Promise<any | null> => {
+      const payload = JSON.stringify({ [envName]: itemsByEnv[envName] });
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const messages = [
+          { role: 'system', content: this.buildTwinPrompt() },
+          {
+            role: 'user',
+            content:
+              `PEÇAS EXTRAÍDAS do ambiente "${envName}":\n${payload.slice(0, 60000)}\n\nReconstrua o Digital Twin paramétrico SOMENTE deste ambiente (environments terá 1 elemento).` +
+              (attempt > 0 ? '\n\nATENÇÃO: a tentativa anterior retornou JSON INVÁLIDO. Retorne SOMENTE JSON estritamente válido.' : ''),
+          },
+        ];
+        const content = await this.callVision(cfg, messages, 10000);
+        if (!content) continue;
+        const parsed = this.tryParseJsonLoose(content);
+        const env = parsed?.environments?.[0];
+        if (env && Array.isArray(env.furnitures)) {
+          console.log(`[Twin] ${envName}: ${env.furnitures.length} móvel(is).`);
+          return { env, warnings: parsed?.audit?.warnings || [] };
+        }
+        console.warn(`[Twin] JSON inválido p/ ambiente "${envName}" (tentativa ${attempt + 1}/2).`);
       }
-      console.warn(`[Twin] JSON inválido do montador (tentativa ${attempt + 1}/2).`);
-    }
-    return null;
+      return null;
+    };
+
+    const results = await this.runPool(envNames, VISION_CONCURRENCY, (name) => buildOneEnv(name));
+    const environments = results.filter(Boolean).map((r: any) => r.env);
+    if (!environments.length) return null;
+
+    const warnings = results.filter(Boolean).flatMap((r: any) => r.warnings);
+    const missing = envNames.filter((_, i) => !results[i]);
+    if (missing.length) warnings.push(`Ambientes não reconstruídos: ${missing.join(', ')}`);
+
+    const furns = environments.reduce((s: number, e: any) => s + (e.furnitures?.length || 0), 0);
+    const comps = environments.reduce(
+      (s: number, e: any) => s + (e.furnitures || []).reduce((t: number, f: any) => t + (f.components?.length || 0), 0),
+      0,
+    );
+    console.log(`[Twin] Digital Twin montado: ${environments.length}/${envNames.length} ambiente(s), ${furns} móvel(is), ${comps} comp.`);
+    return {
+      environments,
+      audit: { warnings, stats: { environments: environments.length, furnitures: furns, components: comps } },
+    };
   }
 
   /** Reconstrói só o Digital Twin a partir dos itens já salvos (sem reprocessar o PDF). */
