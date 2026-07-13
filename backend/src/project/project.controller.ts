@@ -11,8 +11,8 @@ import { execSync } from 'child_process';
  * can read the fine red dimension cotas on A3 technical sheets.
  */
 const PAGE_DPI = 200;
-/** How many Vision calls run in parallel (one per sheet). Keeps latency low without tripping rate limits. */
-const VISION_CONCURRENCY = 1;
+/** How many Vision calls run in parallel (one per sheet). Configurable via env; 2 balances Azure TPM vs latency. */
+const VISION_CONCURRENCY = Math.max(1, Number(process.env.VISION_CONCURRENCY) || 2);
 /** Safety cap so a monster PDF never explodes cost/latency. */
 const MAX_PAGES = 40;
 
@@ -395,6 +395,9 @@ Extraia APENAS o que está documentado nesta prancha. Não invente peças de out
       // Modelos de reasoning (gpt-5/o1/o3) consomem tokens em raciocínio ANTES da
       // resposta — sem folga o JSON sai truncado/vazio (finish_reason=length).
       requestBody.max_completion_tokens = maxTokens + 8000;
+      // reasoning_effort low: corta a latência de ~3min para segundos por folha
+      // sem comprometer a leitura de cotas (a extração é visual, não lógica-profunda)
+      requestBody.reasoning_effort = process.env.VISION_REASONING_EFFORT || 'low';
       // Também não suportam temperatura customizada e retornam vazio com response_format forçado
     } else {
       requestBody.max_tokens = maxTokens;
