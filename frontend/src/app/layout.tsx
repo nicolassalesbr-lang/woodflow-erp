@@ -83,15 +83,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
       </head>
-      <body className="min-h-screen bg-[#0b0907] text-[#f8f0e6]">
+      <body className="min-h-screen bg-[#18120d] text-[#f8f0e6]">
         {isLogin ? (
           children
         ) : (
-          <div className="min-h-screen bg-[radial-gradient(circle_at_50%_0%,rgba(207,158,99,0.14),transparent_45%),linear-gradient(135deg,#1e160f_0%,#18120d_42%,#0b0907_100%)] flex justify-center">
-            {/* Centered App Container Frame */}
-            <div className="flex min-h-screen w-full max-w-[1600px] border-x border-[#e8d4b8]/10 bg-[#18120d]/80 shadow-[0_0_60px_rgba(0,0,0,0.7)]">
-              {/* Sidebar Navigation */}
-              <aside className="hidden w-72 shrink-0 border-r border-[#e8d4b8]/10 bg-[#211811]/90 px-5 py-5 backdrop-blur-xl lg:flex lg:flex-col">
+          <div className="min-h-screen bg-[radial-gradient(circle_at_10%_0%,rgba(207,158,99,0.16),transparent_32%),linear-gradient(135deg,#1e160f_0%,#18120d_42%,#0b0907_100%)]">
+            <div className="flex min-h-screen w-full">
+              {/* Sidebar Navigation - Flush to left edge */}
+              <aside className="hidden w-72 shrink-0 border-r border-[#e8d4b8]/10 bg-[#211811]/92 px-5 py-5 backdrop-blur-xl lg:flex lg:flex-col">
                 {/* Logo */}
                 <div className="mb-8 flex items-center gap-3 px-2">
                   <Logo />
@@ -132,7 +131,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </div>
               </aside>
 
-              {/* Main Content Area */}
+              {/* Main Content Area - Expands to fill 100% of remaining width */}
               <div className="flex min-w-0 flex-1 flex-col">
                 {/* Header */}
                 <header className="sticky top-0 z-40 border-b border-[#e8d4b8]/10 bg-[#18120d]/92 px-6 py-4 backdrop-blur-xl md:px-8">

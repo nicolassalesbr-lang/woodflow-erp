@@ -1828,9 +1828,9 @@ export default function Projects() {
       </section>
 
       {/* Main Grid */}
-      <section className="grid grid-cols-1 gap-5 lg:grid-cols-[360px_1fr]">
+      <section className="grid grid-cols-1 gap-6 lg:grid-cols-12">
         {/* Left projects list */}
-        <aside className="space-y-3">
+        <aside className="space-y-3 lg:col-span-4 xl:col-span-4">
           {projects.map((project) => {
             const active = selectedProj?.id === project.id;
             return (
@@ -1863,7 +1863,7 @@ export default function Projects() {
         </aside>
 
         {/* Right selected project details */}
-        <main className="min-h-[520px] rounded-2xl border border-[#e8d4b8]/12 bg-[#211811]/70 p-5 md:p-7">
+        <main className="min-h-[520px] rounded-2xl border border-[#e8d4b8]/12 bg-[#211811]/70 p-5 md:p-7 lg:col-span-8 xl:col-span-8">
           {selectedProj ? (
             <div className="space-y-7">
               {/* Selected Project Header */}
