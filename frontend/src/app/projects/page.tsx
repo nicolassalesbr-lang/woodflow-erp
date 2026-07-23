@@ -1952,41 +1952,8 @@ export default function Projects() {
                         <Layers className="h-5 w-5 text-[#d6ad79]" />
                       </div>
 
-                                      {selectedItems.length ? (
+                      {selectedItems.length ? (
                         <div className="space-y-6">
-                          {/* Simplified Summary Table */}
-                          <div className="rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.03] p-4 overflow-x-auto">
-                            <h4 className="text-xs font-bold uppercase tracking-wider text-[#d6ad79] mb-3 flex items-center gap-1.5">
-                              <Sparkles className="w-4 h-4 text-emerald-400" /> Resumo Simplificado de Cotas & Módulos
-                            </h4>
-                            <table className="w-full text-left text-xs">
-                              <thead>
-                                <tr className="border-b border-[#e8d4b8]/10 text-[#a99680]">
-                                  <th className="py-2 px-2 font-bold">Módulo / Móvel</th>
-                                  <th className="py-2 px-2 font-bold">Ambiente</th>
-                                  <th className="py-2 px-2 font-bold text-center">L (mm)</th>
-                                  <th className="py-2 px-2 font-bold text-center">A (mm)</th>
-                                  <th className="py-2 px-2 font-bold text-center">P (mm)</th>
-                                  <th className="py-2 px-2 font-bold text-center">Área (m²)</th>
-                                  <th className="py-2 px-2 font-bold">Material / Cor</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-[#e8d4b8]/05 text-[#fff8f0]">
-                                {selectedItems.map((item: any, idx: number) => (
-                                  <tr key={idx} className="hover:bg-[#211811]/40 transition">
-                                    <td className="py-2 px-2 font-semibold text-[#ead5ba]">{item.name || item.description || item.itemType || 'Módulo'}</td>
-                                    <td className="py-2 px-2 text-[#cdbca7]">{item.environment || 'Geral'}</td>
-                                    <td className="py-2 px-2 text-center font-mono text-emerald-400 font-bold">{item.width || '-'}</td>
-                                    <td className="py-2 px-2 text-center font-mono text-emerald-400 font-bold">{item.height || '-'}</td>
-                                    <td className="py-2 px-2 text-center font-mono text-cyan-400">{item.depth || '-'}</td>
-                                    <td className="py-2 px-2 text-center font-mono">{item.area ? Number(item.area).toFixed(2) : '-'}</td>
-                                    <td className="py-2 px-2 text-[#bba890]">{item.materialType || item.cor || 'MDF'}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-
                           {environments.map((env) => {
                             const envItems = selectedItems.filter((i: any) => i.environment === env);
                             const envArea = envItems.reduce((s: number, i: any) => s + (i.area || 0), 0);
@@ -2083,6 +2050,9 @@ export default function Projects() {
                       </div>
                     </aside>
                   </div>
+
+                  {/* Resumo Simplificado de Cotas & Módulos (Colapsado por padrão ao final da página) */}
+                  <SimplifiedSummaryTable items={selectedItems} />
                 </div>
               )}
 
@@ -2605,56 +2575,146 @@ function MiniStat({ label, value }: { label: string; value: any }) {
 }
 
 function ItemDetailCard({ item }: { item: any }) {
-  const hasMeasures = item.width > 0 || item.height > 0;
+  const [expanded, setExpanded] = useState(false);
+  const hasMeasures = item.width > 0 || item.height > 0 || item.depth > 0;
+
   return (
-    <div className="rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] p-4 transition hover:border-[#d6ad79]/28">
-      <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-        <div className="min-w-0">
-          <div className="mb-1.5 flex flex-wrap items-center gap-2">
-            {item.codigo ? (
-              <span className="flex h-5 min-w-[20px] items-center justify-center rounded-md bg-[#d6ad79] px-1.5 text-[11px] font-black text-[#20170f]">
-                {item.codigo}
-              </span>
-            ) : null}
+    <div 
+      onClick={() => setExpanded(!expanded)}
+      className="rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] p-3.5 transition hover:border-[#d6ad79]/40 cursor-pointer select-none group space-y-3"
+    >
+      {/* Compact Collapsed Header (Always Visible) */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          {item.codigo ? (
+            <span className="flex h-5 min-w-[20px] items-center justify-center rounded bg-[#d6ad79] px-1.5 text-[10px] font-black text-[#20170f]">
+              {item.codigo}
+            </span>
+          ) : null}
+          <h4 className="font-semibold text-sm text-[#fff8f0] group-hover:text-[#ead5ba] transition-colors truncate">
+            {item.description || item.name}
+          </h4>
+          {item.quantity > 1 ? (
+            <span className="rounded bg-[#fb923c]/15 px-1.5 py-0.5 text-[10px] font-bold text-[#fb923c] shrink-0">
+              {item.quantity}×
+            </span>
+          ) : null}
+        </div>
+
+        {/* Compact Dimensions L (mm) | A (mm) | P (mm) */}
+        {hasMeasures && (
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center gap-2.5 bg-[#211811]/80 px-3 py-1.5 rounded-lg border border-[#e8d4b8]/10 text-xs font-mono text-[#e8d9c6]">
+              <span><span className="text-[#a99680] text-[10px]">L:</span> <strong className="text-white">{item.width}</strong></span>
+              <span><span className="text-[#a99680] text-[10px]">A:</span> <strong className="text-white">{item.height}</strong></span>
+              <span><span className="text-[#a99680] text-[10px]">P:</span> <strong className="text-white">{item.depth}</strong></span>
+              <span className="text-[9px] text-[#8c7c68]">mm</span>
+            </div>
+            <span className="text-xs text-[#a99680] font-bold">
+              {expanded ? '▲' : '▼'}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Expanded Details (Visible only when clicked) */}
+      {expanded && (
+        <div className="pt-3 border-t border-[#e8d4b8]/10 space-y-2 text-xs text-[#bba890]">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <span className="rounded-md border border-[#e8d4b8]/15 bg-[#211811]/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#c89a63]">
               {item.itemType}
             </span>
-            {item.quantity > 1 ? (
-              <span className="rounded-md bg-[#fb923c]/15 px-2 py-0.5 text-[10px] font-bold text-[#fb923c]">
-                {item.quantity}×
-              </span>
-            ) : null}
-          </div>
-          <h4 className="font-semibold leading-snug text-[#fff8f0]">{item.name || item.description || item.itemType || "Módulo Planejado"}</h4>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-[#bba890]">
             <span className="flex items-center gap-1.5">
               <span className="h-2.5 w-2.5 rounded-sm ring-1 ring-white/10" style={{ background: materialColor(item.materialType) }} />
-              {item.materialType}
+              {item.materialType || "MDF 18mm"}
             </span>
-            {item.cor ? <span className="text-[#a99680]">· {item.cor}</span> : null}
-            {item.acabamento ? <span className="text-[#a99680]">· {item.acabamento}</span> : null}
+            {item.cor ? <span className="text-[#a99680]">Cor: {item.cor}</span> : null}
+            {item.acabamento ? <span className="text-[#a99680]">Acabamento: {item.acabamento}</span> : null}
+            <span className="text-[#8c7c68]">esp. {item.thickness || 18}mm</span>
+            {item.area ? <span className="text-[#fb923c] font-semibold">{Number(item.area).toFixed(2)} m²</span> : null}
           </div>
           {item.observacoes ? (
-            <p className="mt-2 rounded-lg border border-[#e8d4b8]/10 bg-[#211811]/50 px-3 py-1.5 text-[11px] leading-5 text-[#a99680]">
+            <p className="rounded-lg border border-[#e8d4b8]/10 bg-[#211811]/50 px-3 py-1.5 text-[11px] leading-5 text-[#a99680]">
               {item.observacoes}
             </p>
           ) : null}
         </div>
+      )}
+    </div>
+  );
+}
 
-        {hasMeasures && (
-          <div className="shrink-0">
-            <div className="grid grid-cols-3 gap-2 text-center text-xs text-[#cdbca7]">
-              <Measure label="L (mm)" value={item.width} />
-              <Measure label="A (mm)" value={item.height} />
-              <Measure label="P (mm)" value={item.depth} />
-            </div>
-            <div className="mt-2 flex items-center justify-end gap-3 text-[10px] text-[#8c7c68]">
-              <span>esp. {item.thickness || 18}mm</span>
-              {item.area ? <span>{Number(item.area).toFixed(2)} m²</span> : null}
-            </div>
-          </div>
-        )}
-      </div>
+function SimplifiedSummaryTable({ items }: { items: any[] }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  if (!items || items.length === 0) return null;
+
+  return (
+    <div className="rounded-2xl border border-[#e8d4b8]/15 bg-[#18120d]/80 overflow-hidden shadow-lg mt-8">
+      {/* Clickable Header Toggle */}
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full p-4 flex items-center justify-between bg-[#211811]/90 hover:bg-[#281e16] transition-colors text-left border-b border-[#e8d4b8]/10"
+      >
+        <div className="flex items-center gap-2.5">
+          <Sparkles className="w-4 h-4 text-[#d6ad79]" />
+          <h3 className="text-sm font-bold tracking-wide text-[#ead5ba] uppercase">
+            Resumo Simplificado de Cotas & Módulos
+          </h3>
+          <span className="text-xs text-[#a99680] font-normal ml-2">
+            ({items.length} itens no total)
+          </span>
+        </div>
+        <span className="text-xs font-bold text-[#ead5ba] flex items-center gap-1">
+          {isOpen ? 'Ocultar Resumo ▲' : 'Expandir Resumo ▼'}
+        </span>
+      </button>
+
+      {/* Collapsed Table Content */}
+      {isOpen && (
+        <div className="p-4 overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-[#e8d4b8]/15 text-[#bba890] font-bold uppercase tracking-wider text-[10px]">
+                <th className="py-2.5 px-3">Módulo / Móvel</th>
+                <th className="py-2.5 px-3">Ambiente</th>
+                <th className="py-2.5 px-3 text-center">L (mm)</th>
+                <th className="py-2.5 px-3 text-center">A (mm)</th>
+                <th className="py-2.5 px-3 text-center">P (mm)</th>
+                <th className="py-2.5 px-3 text-center">Área (m²)</th>
+                <th className="py-2.5 px-3">Material / Cor</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#e8d4b8]/10 text-[#fff8f0]">
+              {items.map((item, idx) => (
+                <tr key={idx} className="hover:bg-[#fff7ed]/[0.02] transition-colors">
+                  <td className="py-2.5 px-3 font-semibold text-[#e8d9c6]">
+                    {item.description || item.name}
+                  </td>
+                  <td className="py-2.5 px-3 text-[#bba890]">
+                    {item.environment || "—"}
+                  </td>
+                  <td className="py-2.5 px-3 text-center font-mono text-emerald-400 font-bold">
+                    {item.width}
+                  </td>
+                  <td className="py-2.5 px-3 text-center font-mono text-emerald-400 font-bold">
+                    {item.height}
+                  </td>
+                  <td className="py-2.5 px-3 text-center font-mono text-cyan-400 font-bold">
+                    {item.depth}
+                  </td>
+                  <td className="py-2.5 px-3 text-center font-mono text-[#a99680]">
+                    {item.area ? Number(item.area).toFixed(2) : (item.width * item.height / 1000000).toFixed(2)}
+                  </td>
+                  <td className="py-2.5 px-3 text-[#bba890] text-[11px]">
+                    {item.materialType || "MDF Gianduia Trama (Duratex)"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
