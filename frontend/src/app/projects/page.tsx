@@ -434,42 +434,44 @@ export default function Projects() {
   };
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>, projectId: string) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
+    const fileList = event.target.files;
+    if (!fileList || fileList.length === 0) return;
     setUploading(true);
-    setParseStage(`Enviando ${files.length} arquivo(s)...`);
+    setParseStage(`Preparando ${fileList.length} arquivo(s)...`);
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      setParseStage(`Enviando arquivo ${i + 1} de ${files.length}...`);
-      await new Promise<void>((resolve) => {
+    // Coleta todos os arquivos em base64 ANTES de enviar
+    const files: { filename: string; fileBase64: string; mimeType: string }[] = [];
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      setParseStage(`Lendo arquivo ${i + 1} de ${fileList.length}...`);
+      const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = async () => {
-          try {
-            const base64 = (reader.result as string).split(",")[1];
-            await fetch(`${getApiUrl()}/api/projects/${projectId}/parse`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: "Bearer mock-jwt-token-2026"
-              },
-              body: JSON.stringify({
-                filename: file.name,
-                fileBase64: base64,
-                mimeType: file.type
-              })
-            });
-          } catch (err) {
-            console.error("Erro no upload do arquivo:", file.name, err);
-          } finally {
-            resolve();
-          }
+        reader.onload = () => {
+          const result = (reader.result as string).split(",")[1];
+          resolve(result);
         };
+        reader.onerror = reject;
         reader.readAsDataURL(file);
       });
+      files.push({ filename: file.name, fileBase64: base64, mimeType: file.type });
     }
 
-    setParseStage("Lendo folhas e desenhos...");
+    // Envia TODOS os arquivos em uma única chamada batch
+    setParseStage(`Enviando ${files.length} documento(s) para análise...`);
+    try {
+      await fetch(`${getApiUrl()}/api/projects/${projectId}/parse`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer mock-jwt-token-2026"
+        },
+        body: JSON.stringify({ files })
+      });
+    } catch (err) {
+      console.error("Erro no upload batch:", err);
+    }
+
+    setParseStage("Analisando documentos...");
     await pollParseStatus(projectId);
     setUploading(false);
     setParseStage("");

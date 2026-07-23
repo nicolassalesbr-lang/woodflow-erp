@@ -257,6 +257,23 @@ REGRAS DE MEDIDAS E COTAS (OBRIGATÓRIAS)
    - Um móvel desenhado em planta, vista frontal e 3D deve ser contabilizado apenas UMA VEZ.
 
 ═══════════════════════════════════════════════════════════════════
+REGRA DE CONFIABILIDADE (CRÍTICA — NUNCA VIOLE)
+═══════════════════════════════════════════════════════════════════
+- Se uma dimensão (width, height ou depth) NÃO está cotada/escrita no desenho, retorne null para essa dimensão.
+- NUNCA invente, estime ou "adivinhe" medidas. Retorne APENAS o que está EXPLÍCITO no documento.
+- Para imagens 3D / renders / perspectivas SEM cotas numéricas: identifique os móveis visíveis, mas retorne width/height/depth como null e adicione em observacoes: "Medidas ausentes — verificar prancha executiva com cotas".
+- A confiabilidade do orçamento depende 100% de medidas reais dos documentos.
+
+═══════════════════════════════════════════════════════════════════
+MÚLTIPLOS DOCUMENTOS DO MESMO PROJETO
+═══════════════════════════════════════════════════════════════════
+- O projeto pode conter vários documentos: pranchas executivas com cotas, renders 3D, fotos de referência.
+- Cada folha/imagem será enviada individualmente. Extraia o que for possível de cada uma.
+- Se uma folha é um render 3D sem cotas, identifique os móveis mas marque dimensões como null.
+- Se uma folha é uma prancha executiva com cotas, extraia as medidas reais.
+- O sistema consolidará as informações de todos os documentos automaticamente.
+
+═══════════════════════════════════════════════════════════════════
 FORMATO DE SAÍDA (JSON PURO)
 ═══════════════════════════════════════════════════════════════════
 Retorne SOMENTE um objeto JSON puro no formato:
@@ -280,7 +297,15 @@ Retorne SOMENTE um objeto JSON puro no formato:
       "confianca": 98
     }
   ]
-}`;
+}
+
+Nota: Se a dimensão não está cotada, use null:
+  "width": null,
+  "height": null,
+  "depth": null,
+  "observacoes": "Medidas ausentes — verificar prancha executiva com cotas",
+  "classificacao": "visual",
+  "confianca": 30`;
   }
 
   private async callVision(
@@ -609,36 +634,37 @@ Retorne SOMENTE um objeto JSON puro no formato:
     for (const raw of rawItems) {
       if (!raw || typeof raw !== 'object') continue;
       const desc = String(raw.description || raw.itemType || '').trim();
-      if (!desc || desc.length < 2) continue; // Só ignora se não tiver descrição nem tipo de móvel
+      if (!desc || desc.length < 2) continue;
 
       const num = (v: any) => {
         const n = Number(v);
         return Number.isFinite(n) && n > 0 ? n : 0;
       };
 
-      let w = num(raw.width);
-      let h = num(raw.height);
-      let d = num(raw.depth);
-      let t = num(raw.thickness) || 18;
+      const w = num(raw.width);
+      const h = num(raw.height);
+      const d = num(raw.depth);
+      const t = num(raw.thickness) || 18;
 
-      const isAereo = /aéreo|superior|suspenso/i.test(String(raw.itemType || '') + ' ' + desc);
-      const isTorre = /torre|despenseiro|roupeiro|guarda/i.test(String(raw.itemType || '') + ' ' + desc);
-      const isPainel = /painel|cabeceira|espelho/i.test(String(raw.itemType || '') + ' ' + desc);
-
-      // Preenche dimensões ausentes (cotas não explícitas no PDF) com padrões coerentes para marcenaria
-      if (w === 0) w = isTorre ? 600 : isPainel ? 1800 : 1200;
-      if (h === 0) h = isTorre ? 2400 : isAereo ? 600 : isPainel ? 1200 : 920;
-      if (d === 0) d = isPainel ? 50 : isAereo ? 350 : 600;
-
+      // NÃO inventar dimensões! Manter 0 se a IA não encontrou cotas no documento.
       const width = Math.round(w);
       const height = Math.round(h);
       const depth = Math.round(d);
       const thickness = Math.round(t);
       const quantity = Math.max(1, Math.round(Number(raw.quantity) || 1));
 
-      // Métricas derivadas
-      const area = +(((width * height) / 1_000_000) * quantity).toFixed(3);
-      const volume = +(((width * height * thickness) / 1_000_000_000) * quantity).toFixed(4);
+      // Métricas derivadas (só calcula se tiver dimensões reais)
+      const hasRealDims = width > 0 && height > 0;
+      const area = hasRealDims ? +(((width * height) / 1_000_000) * quantity).toFixed(3) : 0;
+      const volume = hasRealDims ? +(((width * height * thickness) / 1_000_000_000) * quantity).toFixed(4) : 0;
+
+      // Adicionar aviso se dimensões estão ausentes
+      const missingDims = [w === 0 && 'largura', h === 0 && 'altura', d === 0 && 'profundidade'].filter(Boolean);
+      let obs = raw.observacoes ? String(raw.observacoes).substring(0, 400) : '';
+      if (missingDims.length > 0) {
+        const warning = `⚠ Medidas não cotadas no documento (${missingDims.join(', ')}). Verificar prancha executiva.`;
+        obs = obs ? `${obs} | ${warning}` : warning;
+      }
 
       out.push({
         environment: String(raw.environment || 'Ambiente').substring(0, 191),
@@ -653,7 +679,7 @@ Retorne SOMENTE um objeto JSON puro no formato:
         materialType: String(raw.materialType || 'MDF 18mm').substring(0, 191),
         cor: raw.cor ? String(raw.cor).substring(0, 100) : null,
         acabamento: raw.acabamento ? String(raw.acabamento).substring(0, 191) : null,
-        observacoes: raw.observacoes ? String(raw.observacoes).substring(0, 500) : null,
+        observacoes: obs.substring(0, 500) || null,
         area,
         volume,
       });
@@ -948,228 +974,266 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
     @Body() body: any
   ) {
     const tenantId = this.verifyTokenAndGetTenantId(authHeader);
-    const { filename, fileBase64, mimeType } = body;
+
+    // Suporta batch (array de files) e single-file (retrocompatível)
+    let files: { filename: string; fileBase64: string; mimeType: string }[] = [];
+    if (Array.isArray(body.files) && body.files.length > 0) {
+      files = body.files;
+    } else if (body.fileBase64) {
+      files = [{ filename: body.filename, fileBase64: body.fileBase64, mimeType: body.mimeType }];
+    }
+
+    if (files.length === 0) {
+      throw new HttpException('Nenhum arquivo enviado.', HttpStatus.BAD_REQUEST);
+    }
 
     const project = await this.prisma.project.findFirst({ where: { id, tenantId } });
     if (!project) {
       throw new HttpException('Project not found', HttpStatus.NOT_FOUND);
     }
 
+    const filenames = files.map(f => f.filename || 'documento').join(', ');
     await this.prisma.project.update({
       where: { id },
       data: {
-        originalFileUrl: filename || 'planta_baixa.pdf',
+        originalFileUrl: filenames.substring(0, 191),
         parseStatus: 'EXTRACTING',
         parseProgress: 5,
         parseError: null,
       },
     });
 
-    // Wipe previous extraction so re-parses start clean.
+    // Wipe previous extraction UMA VEZ antes de processar o batch inteiro.
     await this.prisma.projectItem.deleteMany({ where: { projectId: id } });
 
-    // Executa a análise pesada em BACKGROUND para não estourar o timeout do nginx (504).
-    // O frontend acompanha o progresso via polling de parseStatus/parseProgress.
-    this.runParseJob(id, project, filename, fileBase64, mimeType).catch((e) =>
+    // Executa a análise pesada em BACKGROUND — agora processando TODOS os arquivos do batch.
+    this.runParseJobBatch(id, project, files).catch((e) =>
       console.error('[Parse Job] erro não tratado:', e),
     );
 
-    return { success: true, started: true, parseStatus: 'EXTRACTING' };
+    return { success: true, started: true, parseStatus: 'EXTRACTING', filesCount: files.length };
   }
 
-  /** Job pesado de análise do PDF, executado em background após o 202 inicial. */
-  private async runParseJob(
+  /** Job pesado de análise — processa TODOS os arquivos do batch em sequência, consolidando itens. */
+  private async runParseJobBatch(
     id: string,
     project: any,
-    filename: string,
-    fileBase64: string,
-    mimeType: string,
+    files: { filename: string; fileBase64: string; mimeType: string }[],
   ): Promise<void> {
-    let sanitized: any[] = [];
+    let allRawItems: any[] = [];
     let isRealParsing = false;
     let parseError: string | null = null;
+    const allFilenames: string[] = [];
 
     try {
-      if (!fileBase64 || !mimeType) {
-        throw new Error('Arquivo ausente no payload.');
-      }
-
       const cfg = this.getVisionConfig();
       if (!cfg) {
         throw new Error('Motor de IA (OpenAI/Azure) não configurado no servidor.');
       }
 
-      const buffer = Buffer.from(fileBase64, 'base64');
-      const isPdf = mimeType === 'application/pdf' || filename?.toLowerCase().endsWith('.pdf');
+      console.log(`[AI Reader] Iniciando batch com ${files.length} arquivo(s).`);
 
-      // Extract embedded text (used only as a last-resort fallback).
-      let extractedText = '';
-      if (isPdf) {
-        try {
-          const pdfModule = require('pdf-parse');
-          const PDFParseClass = pdfModule.PDFParse;
-          if (typeof PDFParseClass === 'function') {
-            const parser = new PDFParseClass(new Uint8Array(buffer));
-            const pdfData = await parser.getText();
-            extractedText = pdfData.text || '';
-          } else {
-            const pdfParser = typeof pdfModule === 'function' ? pdfModule : (pdfModule.default || pdfModule);
-            if (typeof pdfParser === 'function') {
-              const pdfData = await pdfParser(buffer);
-              extractedText = pdfData.text || '';
-            }
-          }
-          console.log(`[AI Reader] PDF text extraction: ${extractedText.length} chars.`);
-        } catch (pdfErr) {
-          console.warn('[AI Reader] pdf-parse failed:', pdfErr);
+      // Processa cada arquivo do batch, acumulando TODOS os itens extraídos
+      for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+        const file = files[fileIdx];
+        const fname = file.filename || `documento-${fileIdx + 1}`;
+        allFilenames.push(fname);
+        console.log(`[AI Reader] Processando arquivo ${fileIdx + 1}/${files.length}: ${fname}`);
+
+        if (!file.fileBase64 || !file.mimeType) {
+          console.warn(`[AI Reader] Arquivo ${fname} sem dados — pulando.`);
+          continue;
         }
+
+        const buffer = Buffer.from(file.fileBase64, 'base64');
+        const isPdf = file.mimeType === 'application/pdf' || fname.toLowerCase().endsWith('.pdf');
+
+        // Atualizar progresso
+        const progressBase = Math.round((fileIdx / files.length) * 70) + 10;
+        await this.prisma.project.update({
+          where: { id },
+          data: { parseProgress: progressBase },
+        });
+
+        // Extract embedded text (fallback)
+        let extractedText = '';
+        if (isPdf) {
+          try {
+            const pdfModule = require('pdf-parse');
+            const PDFParseClass = pdfModule.PDFParse;
+            if (typeof PDFParseClass === 'function') {
+              const parser = new PDFParseClass(new Uint8Array(buffer));
+              const pdfData = await parser.getText();
+              extractedText = pdfData.text || '';
+            } else {
+              const pdfParser = typeof pdfModule === 'function' ? pdfModule : (pdfModule.default || pdfModule);
+              if (typeof pdfParser === 'function') {
+                const pdfData = await pdfParser(buffer);
+                extractedText = pdfData.text || '';
+              }
+            }
+            console.log(`[AI Reader] ${fname}: PDF text extraction: ${extractedText.length} chars.`);
+          } catch (pdfErr) {
+            console.warn(`[AI Reader] ${fname}: pdf-parse failed:`, pdfErr);
+          }
+        }
+
+        // Render pages to images
+        let pageImages: string[] = [];
+        if (isPdf) {
+          pageImages = this.convertPdfToImages(buffer).slice(0, MAX_PAGES);
+        } else {
+          pageImages = [file.fileBase64]; // direct image upload
+        }
+
+        // CAMADA 1: Azure Document Intelligence (se configurado)
+        let pageContexts: string[] = [];
+        if (isPdf) {
+          pageContexts = await this.analyzeLayout(buffer);
+        }
+
+        await this.prisma.project.update({
+          where: { id },
+          data: { parseStatus: 'INTERPRETING', parseProgress: progressBase + 5 },
+        });
+
+        // CAMADA 2: Vision AI — analisa cada folha
+        let rawItems: any[] = [];
+        if (pageImages.length > 0) {
+          const totalPagesAllFiles = pageImages.length;
+          const perPage = await this.runPool(
+            pageImages,
+            VISION_CONCURRENCY,
+            async (img, idx) => {
+              let items = await this.analyzePage(cfg, img, idx, totalPagesAllFiles, pageContexts[idx]);
+              if (items.length === 0) {
+                console.warn(`[AI Reader] ${fname} folha ${idx + 1} vazia — retry de completude.`);
+                items = await this.analyzePage(cfg, img, idx, totalPagesAllFiles, pageContexts[idx]);
+              }
+              return items;
+            },
+          );
+          rawItems = perPage.flat();
+        }
+
+        // Last resort: text-only pass
+        if (rawItems.length === 0 && extractedText.length > 100) {
+          console.log(`[AI Reader] ${fname}: No items from imagery, attempting text-only pass...`);
+          const messages = [
+            { role: 'system', content: this.buildSystemPrompt() },
+            {
+              role: 'user',
+              content: `Analise este projeto executivo de marcenaria a partir do texto extraído e extraia TODAS as peças de TODOS os ambientes.\n\nTexto:\n${extractedText.substring(0, 14000)}`,
+            },
+          ];
+          rawItems = this.extractItemsFromContent(await this.callVision(cfg, messages, 8192));
+        }
+
+        console.log(`[AI Reader] ${fname}: ${rawItems.length} raw item(s) extraídos.`);
+        allRawItems = allRawItems.concat(rawItems);
       }
 
-      // Render each sheet to a high-DPI image.
-      let pageImages: string[] = [];
-      if (isPdf) {
-        pageImages = this.convertPdfToImages(buffer).slice(0, MAX_PAGES);
-      } else {
-        pageImages = [fileBase64]; // direct image upload
+      // Consolida TODOS os itens de TODOS os arquivos
+      const sanitized = this.sanitizeItems(allRawItems);
+      const deduplicated = this.dedupeItems(sanitized);
+      isRealParsing = deduplicated.length > 0;
+      console.log(`[AI Reader] Batch consolidado: ${allRawItems.length} raw → ${sanitized.length} sanitized → ${deduplicated.length} deduplicated item(s).`);
+
+      // Persist the extracted pieces.
+      await this.prisma.project.update({
+        where: { id },
+        data: { parseStatus: 'VALIDATING', parseProgress: 85 },
+      });
+
+      const items = [];
+      for (const item of deduplicated) {
+        const createdItem = await this.prisma.projectItem.create({
+          data: {
+            projectId: id,
+            environment: item.environment,
+            itemType: item.itemType,
+            description: item.description,
+            codigo: item.codigo,
+            width: item.width,
+            height: item.height,
+            depth: item.depth,
+            thickness: item.thickness,
+            quantity: item.quantity,
+            materialType: item.materialType,
+            cor: item.cor,
+            acabamento: item.acabamento,
+            observacoes: item.observacoes,
+            area: item.area,
+            volume: item.volume,
+          },
+        });
+        items.push(createdItem);
       }
 
-      // CAMADA 1: extração estrutural (Azure Document Intelligence), se configurado.
-      // Retorna contexto por página; [] se ausente → segue só com a imagem.
-      let pageContexts: string[] = [];
-      if (isPdf) {
-        pageContexts = await this.analyzeLayout(buffer);
+      const uniqueEnvironments = Array.from(new Set(items.map((i) => i.environment)));
+
+      if (!parseError && items.length === 0) {
+        parseError = 'Nenhuma peça extraída dos documentos — verifique os créditos/configuração do provedor de IA e reprocesse.';
+      }
+
+      // FASE SEMÂNTICA: Digital Twin
+      let digitalTwin: any = null;
+      if (!parseError && items.length > 0) {
+        try {
+          const cfgTwin = this.getVisionConfig();
+          if (cfgTwin) {
+            const byEnv: Record<string, any[]> = {};
+            for (const it of items) {
+              (byEnv[it.environment] = byEnv[it.environment] || []).push({
+                itemType: it.itemType, description: it.description, codigo: it.codigo,
+                width: it.width, height: it.height, depth: it.depth, thickness: it.thickness,
+                quantity: it.quantity, materialType: it.materialType, cor: it.cor,
+                acabamento: it.acabamento, observacoes: it.observacoes,
+              });
+            }
+            digitalTwin = await this.assembleDigitalTwin(cfgTwin, byEnv);
+          }
+        } catch (twinErr) {
+          console.warn('[Twin] Falha ao montar Digital Twin:', twinErr);
+        }
       }
 
       await this.prisma.project.update({
         where: { id },
-        data: { parseStatus: 'INTERPRETING', parseProgress: 25 },
-      });
-
-      // CAMADA 2: analisa cada folha em paralelo (imagem + contexto estruturado).
-      // Retry de completude: folha que volta vazia é reprocessada 1x (evita perder folhas).
-      let rawItems: any[] = [];
-      if (pageImages.length > 0) {
-        const perPage = await this.runPool(
-          pageImages,
-          VISION_CONCURRENCY,
-          async (img, idx) => {
-            let items = await this.analyzePage(cfg, img, idx, pageImages.length, pageContexts[idx]);
-            if (items.length === 0) {
-              console.warn(`[AI Reader] Folha ${idx + 1} vazia — retry de completude.`);
-              items = await this.analyzePage(cfg, img, idx, pageImages.length, pageContexts[idx]);
-            }
-            return items;
-          },
-        );
-        rawItems = perPage.flat();
-      }
-
-      // Last resort: if imagery produced nothing but we have text, try a text pass.
-      if (rawItems.length === 0 && extractedText.length > 100) {
-        console.log('[AI Reader] No items from imagery, attempting text-only pass...');
-        const messages = [
-          { role: 'system', content: this.buildSystemPrompt() },
-          {
-            role: 'user',
-            content: `Analise este projeto executivo de marcenaria a partir do texto extraído e extraia TODAS as peças de TODOS os ambientes.\n\nTexto:\n${extractedText.substring(0, 14000)}`,
-          },
-        ];
-        rawItems = this.extractItemsFromContent(await this.callVision(cfg, messages, 8192));
-      }
-
-      sanitized = this.dedupeItems(this.sanitizeItems(rawItems));
-      isRealParsing = sanitized.length > 0;
-      console.log(`[AI Reader] Aggregated ${rawItems.length} raw → ${sanitized.length} sanitized item(s).`);
-    } catch (err: any) {
-      parseError = err?.message || 'Falha na análise do documento.';
-      console.error('[AI Reader] Parse error:', err);
-    }
-
-    await this.prisma.project.update({
-      where: { id },
-      data: { parseStatus: 'VALIDATING', parseProgress: 85 },
-    });
-
-    // Persist the extracted pieces.
-    const items = [];
-    for (const item of sanitized) {
-      const createdItem = await this.prisma.projectItem.create({
         data: {
-          projectId: id,
-          environment: item.environment,
-          itemType: item.itemType,
-          description: item.description,
-          codigo: item.codigo,
-          width: item.width,
-          height: item.height,
-          depth: item.depth,
-          thickness: item.thickness,
-          quantity: item.quantity,
-          materialType: item.materialType,
-          cor: item.cor,
-          acabamento: item.acabamento,
-          observacoes: item.observacoes,
-          area: item.area,
-          volume: item.volume,
+          parseStatus: parseError ? 'FAILED' : 'COMPLETED',
+          parseProgress: 100,
+          parseError,
+          digitalTwin: digitalTwin ?? undefined,
         },
       });
-      items.push(createdItem);
-    }
 
-    const uniqueEnvironments = Array.from(new Set(items.map((i) => i.environment)));
-
-    // 0 itens extraídos NÃO é sucesso: marca FAILED com causa clara (ex.: IA sem quota)
-    // em vez de COMPLETED vazio silencioso.
-    if (!parseError && items.length === 0) {
-      parseError = 'Nenhuma peça extraída do PDF — verifique os créditos/configuração do provedor de IA e reprocesse.';
-    }
-
-    // FASE SEMÂNTICA: monta o Digital Twin paramétrico a partir das peças salvas.
-    let digitalTwin: any = null;
-    if (!parseError && items.length > 0) {
-      try {
-        const cfgTwin = this.getVisionConfig();
-        if (cfgTwin) {
-          const byEnv: Record<string, any[]> = {};
-          for (const it of items) {
-            (byEnv[it.environment] = byEnv[it.environment] || []).push({
-              itemType: it.itemType, description: it.description, codigo: it.codigo,
-              width: it.width, height: it.height, depth: it.depth, thickness: it.thickness,
-              quantity: it.quantity, materialType: it.materialType, cor: it.cor,
-              acabamento: it.acabamento, observacoes: it.observacoes,
-            });
-          }
-          digitalTwin = await this.assembleDigitalTwin(cfgTwin, byEnv);
-        }
-      } catch (twinErr) {
-        console.warn('[Twin] Falha ao montar Digital Twin:', twinErr);
+      if (project.leadId) {
+        try {
+          const batchLabel = allFilenames.join(', ');
+          await this.prisma.leadTimeline.create({
+            data: {
+              leadId: project.leadId,
+              type: 'SYSTEM',
+              content: `${isRealParsing ? 'GPT-4o Vision AI' : 'Analisador'} processou ${files.length} documento(s) "${batchLabel}": ${uniqueEnvironments.length} ambiente(s) (${uniqueEnvironments.join(', ')}), ${items.length} móveis montados.`,
+              author: isRealParsing ? 'GPT-4o Vision AI Reader' : 'Analisador de Projetos',
+            },
+          });
+        } catch { /* ignore timeline errors */ }
       }
+
+      console.log(`[AI Reader] BATCH DONE: ${items.length} items from ${files.length} file(s), real=${isRealParsing}, envs=${uniqueEnvironments.join(', ')}`);
+    } catch (err: any) {
+      parseError = err?.message || 'Falha na análise dos documentos.';
+      console.error('[AI Reader] Batch parse error:', err);
+      await this.prisma.project.update({
+        where: { id },
+        data: {
+          parseStatus: 'FAILED',
+          parseProgress: 100,
+          parseError,
+        },
+      });
     }
-
-    await this.prisma.project.update({
-      where: { id },
-      data: {
-        parseStatus: parseError ? 'FAILED' : 'COMPLETED',
-        parseProgress: 100,
-        parseError,
-        digitalTwin: digitalTwin ?? undefined,
-      },
-    });
-
-    if (project.leadId) {
-      try {
-        await this.prisma.leadTimeline.create({
-          data: {
-            leadId: project.leadId,
-            type: 'SYSTEM',
-            content: `${isRealParsing ? 'GPT-4o Vision AI' : 'Analisador'} processou "${filename || 'projeto.pdf'}": ${uniqueEnvironments.length} ambiente(s) (${uniqueEnvironments.join(', ')}), ${items.length} peças com medidas de produção.`,
-            author: isRealParsing ? 'GPT-4o Vision AI Reader' : 'Analisador de Projetos',
-          },
-        });
-      } catch { /* ignore timeline errors */ }
-    }
-
-    console.log(`[AI Reader] DONE: ${items.length} items, real=${isRealParsing}, envs=${uniqueEnvironments.join(', ')}`);
-    // Sem throw nem return: o parseStatus COMPLETED/FAILED comunica o resultado via polling.
   }
 }
