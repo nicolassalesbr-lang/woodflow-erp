@@ -192,14 +192,16 @@ export class ProjectController {
             'Content-Type': 'application/json',
             'api-key': azureKey,
           },
-          model: deploymentName, // Necessário enviar no body no gateway da Azure AI
+          model: deploymentName,
           name: 'Azure',
         };
+      }
+
       // Caso clássico da Azure OpenAI
       const cleanClassic = cleanEndpoint.endsWith('/') ? cleanEndpoint.slice(0, -1) : cleanEndpoint;
-      const deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4o';
+      const classicDeployment = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4o';
       return {
-        apiUrl: `${cleanClassic}/openai/deployments/${deploymentName}/chat/completions?api-version=2024-02-15-preview`,
+        apiUrl: `${cleanClassic}/openai/deployments/${classicDeployment}/chat/completions?api-version=2024-02-15-preview`,
         headers: {
           'Content-Type': 'application/json',
           'api-key': azureKey,
