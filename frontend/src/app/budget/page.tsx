@@ -193,53 +193,57 @@ export default function BudgetScreen() {
   }, []);
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
     setUploading(true);
-    setParseStage("Enviando arquivo...");
-    setParseProgress(5);
+    setParseStage(`Enviando ${files.length} arquivo(s)...`);
+    setParseProgress(10);
     
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const base64 = (reader.result as string).split(",")[1];
-        const res = await fetch(`${getApiUrl()}/api/projects/proj-1/parse`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: "Bearer mock-jwt-token-2026"
-          },
-          body: JSON.stringify({
-            filename: file.name,
-            fileBase64: base64,
-            mimeType: file.type
-          })
-        });
-        if (!res.ok) {
-          throw new Error("Erro na API de parse.");
-        }
-        setParseStage("Lendo folhas...");
-        await pollParseStatus("proj-1");
-      } catch (err: any) {
-        console.warn("Usando simulação offline de processamento:", err);
-        // Simulation fallback for offline/development
-        setParseStage("Lendo folhas do PDF...");
-        setParseProgress(20);
-        await new Promise(r => setTimeout(r, 2000));
-        setParseStage("Interpretando dimensões...");
-        setParseProgress(60);
-        await new Promise(r => setTimeout(r, 2000));
-        setParseStage("Processando Digital Twin...");
-        setParseProgress(90);
-        await new Promise(r => setTimeout(r, 1000));
-        
-        await calculateBudget();
-        setStep(3);
-        setUploading(false);
-        setParseStage("");
-      }
-    };
-    reader.readAsDataURL(file);
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      setParseStage(`Enviando arquivo ${i + 1} de ${files.length}...`);
+      await new Promise<void>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            const base64 = (reader.result as string).split(",")[1];
+            await fetch(`${getApiUrl()}/api/projects/proj-1/parse`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: "Bearer mock-jwt-token-2026"
+              },
+              body: JSON.stringify({
+                filename: file.name,
+                fileBase64: base64,
+                mimeType: file.type
+              })
+            });
+          } catch (err) {
+            console.warn("Offline parse fallback for file:", file.name, err);
+          } finally {
+            resolve();
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    try {
+      setParseStage("Lendo folhas e desenhos...");
+      await pollParseStatus("proj-1");
+    } catch {
+      setParseStage("Lendo folhas e desenhos...");
+      setParseProgress(40);
+      await new Promise(r => setTimeout(r, 1500));
+      setParseStage("Interpretando dimensões...");
+      setParseProgress(75);
+      await new Promise(r => setTimeout(r, 1500));
+      await calculateBudget();
+      setStep(3);
+      setUploading(false);
+      setParseStage("");
+    }
   };
 
   const STAGE_LABEL: Record<string, string> = {
@@ -448,10 +452,10 @@ export default function BudgetScreen() {
                 <div className="flex-grow border-t border-border/60"></div>
               </div>
 
-              {/* Option B: Upload new PDF */}
+              {/* Option B: Upload new files */}
               <div className="max-w-xl mx-auto space-y-4">
                 <h3 className="text-center text-sm font-bold text-gray-300 flex items-center justify-center gap-2">
-                  <FileUp className="w-4 h-4 text-emerald-400" /> Subir um Novo PDF de Desenho Técnico
+                  <FileUp className="w-4 h-4 text-emerald-400" /> Subir Novos Arquivos do Projeto
                 </h3>
                 <div className="glass p-6 rounded-2xl border border-[#e8d4b8]/10 text-center space-y-4 hover:border-[#ead5ba]/30 transition-all duration-300">
                   <label className="flex flex-col items-center justify-center gap-3 cursor-pointer py-6 group">
@@ -459,12 +463,12 @@ export default function BudgetScreen() {
                       <UploadCloud className="w-6 h-6" />
                     </div>
                     <div className="space-y-0.5">
-                      <span className="text-xs font-bold text-[#fff8f0] group-hover:text-[#ead5ba] transition-colors">Clique para enviar novo PDF</span>
-                      <p className="text-[11px] text-gray-400">ou arraste e solte o arquivo aqui</p>
+                      <span className="text-xs font-bold text-[#fff8f0] group-hover:text-[#ead5ba] transition-colors">Clique para enviar arquivos</span>
+                      <p className="text-[11px] text-gray-400">ou arraste e solte os arquivos aqui</p>
                     </div>
                     <input
                       type="file"
-                      accept="application/pdf"
+                      multiple
                       onChange={handleFileChange}
                       className="hidden"
                     />

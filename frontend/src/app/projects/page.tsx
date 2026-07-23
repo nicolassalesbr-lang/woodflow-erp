@@ -414,42 +414,45 @@ export default function Projects() {
   };
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>, projectId: string) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
     setUploading(true);
-    setParseStage("Enviando arquivo...");
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const base64 = (reader.result as string).split(",")[1];
-        // Inicia o parse (retorna 202 na hora; a análise roda em background no servidor).
-        const res = await fetch(`${getApiUrl()}/api/projects/${projectId}/parse`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: "Bearer mock-jwt-token-2026"
-          },
-          body: JSON.stringify({
-            filename: file.name,
-            fileBase64: base64,
-            mimeType: file.type
-          })
-        });
-        if (!res.ok) {
-          const errMsg = await res.text();
-          throw new Error(errMsg || "Erro ao iniciar o processamento.");
-        }
-        setParseStage("Lendo folhas...");
-        await pollParseStatus(projectId);
-      } catch (err: any) {
-        console.error(err);
-        alert("Falha no upload/processamento: " + (err.message || err));
-      } finally {
-        setUploading(false);
-        setParseStage("");
-      }
-    };
-    reader.readAsDataURL(file);
+    setParseStage(`Enviando ${files.length} arquivo(s)...`);
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      setParseStage(`Enviando arquivo ${i + 1} de ${files.length}...`);
+      await new Promise<void>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            const base64 = (reader.result as string).split(",")[1];
+            await fetch(`${getApiUrl()}/api/projects/${projectId}/parse`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: "Bearer mock-jwt-token-2026"
+              },
+              body: JSON.stringify({
+                filename: file.name,
+                fileBase64: base64,
+                mimeType: file.type
+              })
+            });
+          } catch (err) {
+            console.error("Erro no upload do arquivo:", file.name, err);
+          } finally {
+            resolve();
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    setParseStage("Lendo folhas e desenhos...");
+    await pollParseStatus(projectId);
+    setUploading(false);
+    setParseStage("");
   };
 
   const calculateBudget = async () => {
@@ -1871,11 +1874,11 @@ export default function Projects() {
                     }`}
                   >
                     <FileUp className="h-4 w-4" />
-                    {uploading ? (parseStage || "Enviando...") : "Subir PDF"}
+                    {uploading ? (parseStage || "Enviando...") : "Subir Arquivos"}
                     <input
                       type="file"
                       className="hidden"
-                      accept=".pdf"
+                      multiple
                       onChange={(event) => handleFileChange(event, selectedProj.id)}
                     />
                   </label>
