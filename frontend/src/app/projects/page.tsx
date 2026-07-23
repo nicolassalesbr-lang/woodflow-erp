@@ -1952,8 +1952,41 @@ export default function Projects() {
                         <Layers className="h-5 w-5 text-[#d6ad79]" />
                       </div>
 
-                      {selectedItems.length ? (
+                                      {selectedItems.length ? (
                         <div className="space-y-6">
+                          {/* Simplified Summary Table */}
+                          <div className="rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.03] p-4 overflow-x-auto">
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-[#d6ad79] mb-3 flex items-center gap-1.5">
+                              <Sparkles className="w-4 h-4 text-emerald-400" /> Resumo Simplificado de Cotas & Módulos
+                            </h4>
+                            <table className="w-full text-left text-xs">
+                              <thead>
+                                <tr className="border-b border-[#e8d4b8]/10 text-[#a99680]">
+                                  <th className="py-2 px-2 font-bold">Módulo / Móvel</th>
+                                  <th className="py-2 px-2 font-bold">Ambiente</th>
+                                  <th className="py-2 px-2 font-bold text-center">L (mm)</th>
+                                  <th className="py-2 px-2 font-bold text-center">A (mm)</th>
+                                  <th className="py-2 px-2 font-bold text-center">P (mm)</th>
+                                  <th className="py-2 px-2 font-bold text-center">Área (m²)</th>
+                                  <th className="py-2 px-2 font-bold">Material / Cor</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-[#e8d4b8]/05 text-[#fff8f0]">
+                                {selectedItems.map((item: any, idx: number) => (
+                                  <tr key={idx} className="hover:bg-[#211811]/40 transition">
+                                    <td className="py-2 px-2 font-semibold text-[#ead5ba]">{item.name || item.description || item.itemType || 'Módulo'}</td>
+                                    <td className="py-2 px-2 text-[#cdbca7]">{item.environment || 'Geral'}</td>
+                                    <td className="py-2 px-2 text-center font-mono text-emerald-400 font-bold">{item.width || '-'}</td>
+                                    <td className="py-2 px-2 text-center font-mono text-emerald-400 font-bold">{item.height || '-'}</td>
+                                    <td className="py-2 px-2 text-center font-mono text-cyan-400">{item.depth || '-'}</td>
+                                    <td className="py-2 px-2 text-center font-mono">{item.area ? Number(item.area).toFixed(2) : '-'}</td>
+                                    <td className="py-2 px-2 text-[#bba890]">{item.materialType || item.cor || 'MDF'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+
                           {environments.map((env) => {
                             const envItems = selectedItems.filter((i: any) => i.environment === env);
                             const envArea = envItems.reduce((s: number, i: any) => s + (i.area || 0), 0);
@@ -2592,7 +2625,7 @@ function ItemDetailCard({ item }: { item: any }) {
               </span>
             ) : null}
           </div>
-          <h4 className="font-semibold leading-snug text-[#fff8f0]">{item.description}</h4>
+          <h4 className="font-semibold leading-snug text-[#fff8f0]">{item.name || item.description || item.itemType || "Módulo Planejado"}</h4>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-[#bba890]">
             <span className="flex items-center gap-1.5">
               <span className="h-2.5 w-2.5 rounded-sm ring-1 ring-white/10" style={{ background: materialColor(item.materialType) }} />
