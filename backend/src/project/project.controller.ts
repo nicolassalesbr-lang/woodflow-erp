@@ -278,68 +278,6 @@ Retorne SOMENTE um objeto JSON puro no formato:
     }
   ]
 }`;
-  }════
-
-Registre no campo "iluminacao": tipo (fita LED, spot, arandela), temperatura (3000K, 4000K — diferencie!), localização (perfil superior, rodapé, nicho), forma de acionamento (sensor de presença, interruptor, botoeira), necessidade de recorte.
-
-═══════════════════════════════════════════════════════════════════
-OBSERVAÇÕES DE FABRICAÇÃO E INSTALAÇÃO
-═══════════════════════════════════════════════════════════════════
-
-Extraia INTEGRALMENTE no campo "fabricacao": rodapé recuado, rodateto recuado, trilho fixado no forro, perfil na cor preta/alumínio, puxador tipo cava/chanfro/passante, bordas avançadas, detalhes de negativos, ripados e espaçamentos, interior fitado em outro MDF, peças reguláveis/removíveis, alturas de instalação, conferências obrigatórias no local.
-
-NÃO resuma instruções que afetem orçamento ou fabricação.
-
-═══════════════════════════════════════════════════════════════════
-FORMATO DE SAÍDA (JSON PURO)
-═══════════════════════════════════════════════════════════════════
-
-Retorne SOMENTE um objeto JSON puro (sem markdown, sem crases, sem texto fora do JSON) no formato:
-{
-  "items": [
-    {
-      "environment": "string — nome do ambiente",
-      "itemType": "Caixa|Aéreo|Painel|Estante|Porta|Gaveta|Gavetão|Prateleira|Nicho|Tampo|Bancada|Cabeceira|Mesa|Cama|Balcão|Guarda-Roupa|Rodapé|Rodateto|Fundo|Lateral|Divisória|Cabideiro|Ripado|Saia|Cuba|Perfil|Metalon|Ferragem|Espelho|Vidro|LED",
-      "description": "descrição técnica detalhada da peça (incluir função, posição e relação com o módulo pai)",
-      "codigo": "referência/balão da prancha (letras A, B, C, D ou código do detalhe — ou vazio)",
-      "width": 0,
-      "height": 0,
-      "depth": 0,
-      "thickness": 18,
-      "quantity": 1,
-      "materialType": "material exato conforme legenda (ex.: MDF Beton - Guararapes)",
-      "cor": "cor/tom exato (ou vazio)",
-      "acabamento": "acabamento exato (ou vazio)",
-      "observacoes": "notas técnicas + instruções de fabricação/instalação + conflitos + fórmulas de cálculo",
-      "classificacao": "explicita|calculada|inferida|estimada|ilegivel",
-      "confianca": 95,
-      "ferragens": ["puxador P170 preto", "dobradiça", "corrediça"],
-      "iluminacao": "fita LED 3000K embutida no perfil superior, acionamento por sensor de presença",
-      "fabricacao": "rodapé recuado 5cm, interior fitado MDF Areia, prateleiras reguláveis"
-    }
-  ]
-}
-
-CAMPOS OBRIGATÓRIOS: environment, itemType, description, width, height, depth, thickness, quantity, materialType.
-CAMPOS RECOMENDADOS: cor, acabamento, observacoes, classificacao, confianca, ferragens, iluminacao, fabricacao, codigo.
-
-Quando classificacao for "calculada", inclua a fórmula nas observacoes (ex.: "calculada: 1480 - 36 = 1444, cotas de origem: largura total 148cm menos 2 laterais de 1.8cm").
-Quando classificacao for "ilegivel", indique as leituras possíveis nas observacoes.
-Quando houver conflito entre vistas, indique em observacoes: "CONFLITO: vista frontal = 550mm, corte = 530mm".
-
-═══════════════════════════════════════════════════════════════════
-AUDITORIA FINAL (antes de retornar o JSON)
-═══════════════════════════════════════════════════════════════════
-
-1. Compare todas as vistas do mesmo móvel nesta prancha.
-2. Verifique se a soma das cotas parciais corresponde à medida total.
-3. Compare quantidade de portas, gavetas, nichos e prateleiras entre vistas.
-4. Verifique se todos os materiais da legenda foram associados a alguma peça.
-5. Verifique se toda ferragem indicada aparece no item correto.
-6. Verifique se todos os móveis das imagens 3D foram inventariados.
-7. Liste medidas necessárias à fabricação ausentes como items com classificacao "ausente".
-
-Extraia APENAS o que está documentado nesta prancha. Não invente peças de outras folhas. Se um móvel não tiver cota visível para uma dimensão, deduza pela proporção do desenho e espessura — mas classifique como "estimada" com confianca baixa.`;
   }
 
   private async callVision(
