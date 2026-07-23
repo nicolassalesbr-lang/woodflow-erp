@@ -324,11 +324,15 @@ Retorne SOMENTE um objeto JSON puro no formato:
     }
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 180000); // 180s (3 minutos) para modelos de visão pesados
+
       const response = await fetch(cfg.apiUrl, {
         method: 'POST',
         headers: cfg.headers,
         body: JSON.stringify(requestBody),
-      });
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeoutId));
 
       // 429/503: diferenciar quota ESGOTADA (permanente) de rate limit temporário
       if (response.status === 429 || response.status === 503) {
@@ -612,14 +616,15 @@ Retorne SOMENTE um objeto JSON puro no formato:
       let d = num(raw.depth);
       let t = num(raw.thickness) || 18;
 
-      // Need at least two real dimensions to be a meaningful piece.
+      // Need at least 1 real dimension (e.g. width) to represent a furniture module
       const realDims = [w, h, d].filter((x) => x > 0).length;
-      if (realDims < 2) continue;
+      if (realDims < 1) continue;
 
-      // Fill the missing (thin) axis with the material thickness — never leave a 0.
-      if (w === 0) w = t;
-      if (h === 0) h = t;
-      if (d === 0) d = t;
+      // Fill missing axes with sensible defaults for furniture modules
+      const isAereo = /aéreo|superior|suspenso/i.test(String(raw.itemType || '') + ' ' + String(raw.description || ''));
+      if (w === 0) w = 600;
+      if (h === 0) h = isAereo ? 600 : 920;
+      if (d === 0) d = isAereo ? 350 : 600;
 
       const width = Math.round(w);
       const height = Math.round(h);
