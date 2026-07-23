@@ -88,7 +88,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           children
         ) : (
           <div className="min-h-screen bg-[radial-gradient(circle_at_10%_0%,rgba(207,158,99,0.16),transparent_32%),linear-gradient(135deg,#1e160f_0%,#18120d_42%,#0b0907_100%)]">
-            <div className="flex min-h-screen">
+            <div className="mx-auto flex min-h-screen w-full max-w-[1800px] shadow-2xl border-x border-[#e8d4b8]/10">
               {/* Sidebar Navigation */}
               <aside className="hidden w-72 shrink-0 border-r border-[#e8d4b8]/10 bg-[#211811]/86 px-5 py-5 backdrop-blur-xl lg:flex lg:flex-col">
                 {/* Logo */}
@@ -135,7 +135,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <div className="flex min-w-0 flex-1 flex-col">
                 {/* Header */}
                 <header className="sticky top-0 z-40 border-b border-[#e8d4b8]/10 bg-[#18120d]/88 px-4 py-4 backdrop-blur-xl md:px-8">
-                  <div className="flex items-center justify-between gap-4">
+                  <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
                       <button
                         onClick={() => setMobileMenuOpen((value) => !value)}
@@ -180,7 +180,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
                 {/* Page Content */}
                 <main className="flex-1 px-4 py-6 md:px-8 md:py-8 xl:px-10">
-                  <div className="mx-auto max-w-7xl">
+                  <div className="mx-auto max-w-[1600px]">
                     {children}
                   </div>
                 </main>
