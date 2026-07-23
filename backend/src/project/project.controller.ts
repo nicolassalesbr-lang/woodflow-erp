@@ -128,18 +128,27 @@ export class ProjectController {
   private deadProviders = new Set<string>();
 
   /**
-   * Lista ordenada de provedores Vision disponíveis (OpenAI padrão e/ou Azure).
-   * VISION_PROVIDER=azure inverte a prioridade. O failover em callVision pula
+   * Lista ordenada de provedores Vision disponíveis (Gemini, OpenAI e/ou Azure).
+   * VISION_PROVIDER=azure|gemini inverte a prioridade. O failover em callVision pula
    * automaticamente para o próximo quando um deles fica sem quota.
    */
   private getVisionConfigs(): VisionConfig[] {
     const configs: VisionConfig[] = [];
+    const gemini = this.buildGeminiConfig();
     const openai = this.buildOpenAIConfig();
     const azure = this.buildAzureConfig();
-    if ((process.env.VISION_PROVIDER || '').toLowerCase() === 'azure') {
+    const preferred = (process.env.VISION_PROVIDER || '').toLowerCase();
+    if (preferred === 'azure') {
       if (azure) configs.push(azure);
+      if (gemini) configs.push(gemini);
       if (openai) configs.push(openai);
+    } else if (preferred === 'openai') {
+      if (openai) configs.push(openai);
+      if (gemini) configs.push(gemini);
+      if (azure) configs.push(azure);
     } else {
+      // Padrão: Gemini primeiro (quota gratuita disponível), depois OpenAI, depois Azure
+      if (gemini) configs.push(gemini);
       if (openai) configs.push(openai);
       if (azure) configs.push(azure);
     }
@@ -168,6 +177,22 @@ export class ProjectController {
       },
       model: process.env.OPENAI_MODEL || 'gpt-4o',
       name: 'OpenAI',
+    };
+  }
+
+  private buildGeminiConfig(): VisionConfig | null {
+    const rawKey = process.env.GEMINI_API_KEY;
+    if (!rawKey) return null;
+    const key = rawKey.trim().replace(/^["']|["']$/g, '');
+    const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    return {
+      apiUrl: `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${key}`,
+      },
+      model,
+      name: 'Gemini',
     };
   }
 
