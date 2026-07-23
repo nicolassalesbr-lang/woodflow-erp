@@ -157,8 +157,9 @@ export class ProjectController {
   }
 
   private buildOpenAIConfig(): VisionConfig | null {
-    const standardKey = process.env.OPENAI_API_KEY;
-    if (!standardKey) return null;
+    const rawKey = process.env.OPENAI_API_KEY;
+    if (!rawKey) return null;
+    const standardKey = rawKey.trim().replace(/^["']|["']$/g, '');
     return {
       apiUrl: 'https://api.openai.com/v1/chat/completions',
       headers: {
@@ -606,6 +607,10 @@ Retorne SOMENTE um objeto JSON puro no formato:
   private sanitizeItems(rawItems: any[]): any[] {
     const out: any[] = [];
     for (const raw of rawItems) {
+      if (!raw || typeof raw !== 'object') continue;
+      const desc = String(raw.description || raw.itemType || '').trim();
+      if (!desc || desc.length < 2) continue; // Só ignora se não tiver descrição nem tipo de móvel
+
       const num = (v: any) => {
         const n = Number(v);
         return Number.isFinite(n) && n > 0 ? n : 0;
@@ -616,15 +621,14 @@ Retorne SOMENTE um objeto JSON puro no formato:
       let d = num(raw.depth);
       let t = num(raw.thickness) || 18;
 
-      // Need at least 1 real dimension (e.g. width) to represent a furniture module
-      const realDims = [w, h, d].filter((x) => x > 0).length;
-      if (realDims < 1) continue;
+      const isAereo = /aéreo|superior|suspenso/i.test(String(raw.itemType || '') + ' ' + desc);
+      const isTorre = /torre|despenseiro|roupeiro|guarda/i.test(String(raw.itemType || '') + ' ' + desc);
+      const isPainel = /painel|cabeceira|espelho/i.test(String(raw.itemType || '') + ' ' + desc);
 
-      // Fill missing axes with sensible defaults for furniture modules
-      const isAereo = /aéreo|superior|suspenso/i.test(String(raw.itemType || '') + ' ' + String(raw.description || ''));
-      if (w === 0) w = 600;
-      if (h === 0) h = isAereo ? 600 : 920;
-      if (d === 0) d = isAereo ? 350 : 600;
+      // Preenche dimensões ausentes (cotas não explícitas no PDF) com padrões coerentes para marcenaria
+      if (w === 0) w = isTorre ? 600 : isPainel ? 1800 : 1200;
+      if (h === 0) h = isTorre ? 2400 : isAereo ? 600 : isPainel ? 1200 : 920;
+      if (d === 0) d = isPainel ? 50 : isAereo ? 350 : 600;
 
       const width = Math.round(w);
       const height = Math.round(h);
@@ -632,14 +636,14 @@ Retorne SOMENTE um objeto JSON puro no formato:
       const thickness = Math.round(t);
       const quantity = Math.max(1, Math.round(Number(raw.quantity) || 1));
 
-      // Derived production metrics (m² face area, m³ volume) per the whole quantity.
+      // Métricas derivadas
       const area = +(((width * height) / 1_000_000) * quantity).toFixed(3);
       const volume = +(((width * height * thickness) / 1_000_000_000) * quantity).toFixed(4);
 
       out.push({
         environment: String(raw.environment || 'Ambiente').substring(0, 191),
         itemType: String(raw.itemType || 'Caixa').substring(0, 100),
-        description: String(raw.description || 'Peça estrutural').substring(0, 500),
+        description: desc.substring(0, 500),
         codigo: raw.codigo ? String(raw.codigo).substring(0, 60) : null,
         width,
         height,
