@@ -10,7 +10,10 @@ import {
   FileText,
   DollarSign,
   UploadCloud,
-  ArrowRight
+  ArrowRight,
+  Folder,
+  CheckCircle2,
+  FileUp
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import confetti from 'canvas-confetti';
@@ -56,15 +59,47 @@ export default function BudgetScreen() {
   });
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'calc' | 'cutting'>('calc');
-  const [step, setStep] = useState(1); // 1: Select Method, 2: Upload File, 3: Pricing & Results
+  const [step, setStep] = useState(1); // 1: Select Method, 2: Select/Upload Project, 3: Pricing & Results
   const [uploading, setUploading] = useState(false);
   const [parseStage, setParseStage] = useState("");
   const [parseProgress, setParseProgress] = useState(0);
 
-  const calculateBudget = async () => {
+  const [projectsList, setProjectsList] = useState<any[]>([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState('proj-1');
+  const [selectedProjectName, setSelectedProjectName] = useState('');
+
+  const fetchProjects = async () => {
+    setLoadingProjects(true);
+    try {
+      const res = await fetch(`${getApiUrl()}/api/projects`, {
+        headers: { 'Authorization': 'Bearer mock-jwt-token-2026' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          setProjectsList(data);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("Using offline mock projects list:", err);
+    } finally {
+      setLoadingProjects(false);
+    }
+
+    setProjectsList([
+      { id: 'proj-1', name: 'Residencial Kaza - Cozinha & Suíte', parseStatus: 'COMPLETED', itemsCount: 54, createdAt: '2026-07-11' },
+      { id: 'proj-2', name: 'Apartamento 302 - Balcão & Varanda', parseStatus: 'COMPLETED', itemsCount: 28, createdAt: '2026-07-10' },
+      { id: 'proj-3', name: 'Cozinha Gourmet Sob Medida', parseStatus: 'COMPLETED', itemsCount: 18, createdAt: '2026-07-09' }
+    ]);
+  };
+
+  const calculateBudget = async (targetProjectId?: string) => {
+    const projId = targetProjectId || selectedProjectId || 'proj-1';
     setLoading(true);
     try {
-      const res = await fetch(`${getApiUrl()}/api/budgets/calculate/proj-1`, {
+      const res = await fetch(`${getApiUrl()}/api/budgets/calculate/${projId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -100,7 +135,7 @@ export default function BudgetScreen() {
 
       setBudget({
         id: 'mock-b-1',
-        projectId: 'proj-1',
+        projectId: projId,
         pricingMethod: params.pricingMethod,
         sqmValue: params.sqmValue,
         totalMdfSheets: params.pricingMethod === 'SQM' ? 0 : 6,
@@ -153,6 +188,7 @@ export default function BudgetScreen() {
   };
 
   useEffect(() => {
+    fetchProjects();
     fetchExistingBudget();
   }, []);
 
@@ -329,7 +365,7 @@ export default function BudgetScreen() {
       )}
 
       {step === 2 && (
-        <div className="max-w-xl mx-auto space-y-8 py-12">
+        <div className="max-w-4xl mx-auto space-y-8 py-10">
           <div className="text-center space-y-3">
             <button
               onClick={() => setStep(1)}
@@ -337,14 +373,14 @@ export default function BudgetScreen() {
             >
               ← Voltar para seleção de método
             </button>
-            <h1 className="text-3xl font-extrabold tracking-tight text-white">Subir Desenho Técnico</h1>
+            <h1 className="text-3xl font-extrabold tracking-tight text-white">Selecionar Projeto ou Subir Novo PDF</h1>
             <p className="text-gray-400 text-sm">
               Método Selecionado: <span className="text-emerald-400 font-bold">{params.pricingMethod === 'SQM' ? 'Metro Quadrado (m²)' : 'Custo Detalhado (Markup)'}</span>
             </p>
           </div>
 
           {uploading ? (
-            <div className="glass p-8 rounded-2xl border border-[#e8d4b8]/10 text-center space-y-6">
+            <div className="max-w-xl mx-auto glass p-8 rounded-2xl border border-[#e8d4b8]/10 text-center space-y-6">
               <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
               <div className="space-y-2">
                 <h3 className="text-lg font-bold text-white">{parseStage || "Processando arquivo..."}</h3>
@@ -359,23 +395,82 @@ export default function BudgetScreen() {
               <span className="text-[10px] text-gray-500 font-bold uppercase">{parseProgress}% Concluído</span>
             </div>
           ) : (
-            <div className="glass p-8 rounded-2xl border border-[#e8d4b8]/10 text-center space-y-6 hover:border-[#ead5ba]/30 transition-all duration-300">
-              <label className="flex flex-col items-center justify-center gap-4 cursor-pointer py-10 group">
-                <div className="w-16 h-16 rounded-2xl bg-[#ead5ba]/10 border border-[#ead5ba]/20 flex items-center justify-center text-[#ead5ba] group-hover:bg-[#ead5ba]/20 group-hover:scale-105 transition-all duration-300">
-                  <UploadCloud className="w-8 h-8" />
+            <div className="space-y-8">
+              {/* Option A: Select Existing Project */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Folder className="w-5 h-5 text-emerald-400" /> Selecionar dos Projetos Já Processados
+                  </h3>
+                  <span className="text-xs text-gray-400">Escolha um projeto cadastrado no sistema</span>
                 </div>
-                <div className="space-y-1">
-                  <span className="text-sm font-bold text-[#fff8f0] group-hover:text-[#ead5ba] transition-colors">Clique para subir o PDF</span>
-                  <p className="text-xs text-gray-400">ou arraste e solte o arquivo aqui</p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {projectsList.map((proj) => (
+                    <div
+                      key={proj.id}
+                      onClick={async () => {
+                        setSelectedProjectId(proj.id);
+                        setSelectedProjectName(proj.name);
+                        await calculateBudget(proj.id);
+                        setStep(3);
+                      }}
+                      className="group p-5 rounded-2xl border border-[#e8d4b8]/10 bg-[#211811]/60 hover:border-emerald-500/40 hover:bg-[#211811]/90 cursor-pointer transition-all duration-300 flex flex-col justify-between space-y-4"
+                    >
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> Processado
+                          </span>
+                          <span className="text-[10px] text-gray-500">{proj.createdAt ? new Date(proj.createdAt).toLocaleDateString('pt-BR') : 'Recente'}</span>
+                        </div>
+                        <h4 className="text-sm font-bold text-white group-hover:text-emerald-400 transition-colors line-clamp-1">
+                          {proj.name}
+                        </h4>
+                        <p className="text-xs text-gray-400">
+                          {proj.items?.length || proj.itemsCount || 0} itens / móveis identificados
+                        </p>
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs text-emerald-400 font-bold pt-2 border-t border-border/40">
+                        <span>Gerar Orçamento</span>
+                        <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <span className="text-[10px] text-gray-500 font-bold uppercase mt-2">Somente arquivos .pdf de desenhos técnicos</span>
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={handleFileChange}
-                  className="hidden"
-                />
-              </label>
+              </div>
+
+              {/* Divider */}
+              <div className="relative flex py-2 items-center">
+                <div className="flex-grow border-t border-border/60"></div>
+                <span className="flex-shrink mx-4 text-xs font-bold text-gray-500 uppercase">OU</span>
+                <div className="flex-grow border-t border-border/60"></div>
+              </div>
+
+              {/* Option B: Upload new PDF */}
+              <div className="max-w-xl mx-auto space-y-4">
+                <h3 className="text-center text-sm font-bold text-gray-300 flex items-center justify-center gap-2">
+                  <FileUp className="w-4 h-4 text-emerald-400" /> Subir um Novo PDF de Desenho Técnico
+                </h3>
+                <div className="glass p-6 rounded-2xl border border-[#e8d4b8]/10 text-center space-y-4 hover:border-[#ead5ba]/30 transition-all duration-300">
+                  <label className="flex flex-col items-center justify-center gap-3 cursor-pointer py-6 group">
+                    <div className="w-12 h-12 rounded-xl bg-[#ead5ba]/10 border border-[#ead5ba]/20 flex items-center justify-center text-[#ead5ba] group-hover:bg-[#ead5ba]/20 group-hover:scale-105 transition-all duration-300">
+                      <UploadCloud className="w-6 h-6" />
+                    </div>
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-bold text-[#fff8f0] group-hover:text-[#ead5ba] transition-colors">Clique para enviar novo PDF</span>
+                      <p className="text-[11px] text-gray-400">ou arraste e solte o arquivo aqui</p>
+                    </div>
+                    <input
+                      type="file"
+                      accept="application/pdf"
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -542,7 +637,7 @@ export default function BudgetScreen() {
                 )}
 
                 <button 
-                  onClick={calculateBudget}
+                  onClick={() => calculateBudget()}
                   disabled={loading}
                   className="w-full py-3 rounded-xl bg-emerald-500 text-background font-bold text-sm shadow-glow-emerald hover:opacity-95 transition-opacity"
                 >
