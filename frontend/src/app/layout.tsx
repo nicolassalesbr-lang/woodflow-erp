@@ -24,17 +24,9 @@ import {
 import CopilotDrawer from "../components/copilot-drawer";
 
 const navItems = [
-  { name: "Inicio", path: "/dashboard", icon: Home },
   { name: "Clientes", path: "/crm", icon: Users2 },
   { name: "Projetos", path: "/projects", icon: Layers },
   { name: "Orcamentos", path: "/budget", icon: Calculator },
-  { name: "Entregas", path: "/production", icon: Activity },
-  { name: "Relatórios", path: "/analytics", icon: BarChart2 },
-  { name: "Estoque", path: "/inventory", icon: Package },
-  { name: "Compras", path: "/purchases", icon: ShoppingCart },
-  { name: "Financeiro", path: "/financial", icon: DollarSign },
-  { name: "Configurações", path: "/settings", icon: Settings },
-  { name: "Suporte", path: "/help", icon: HelpCircle },
 ];
 
 const pageTitles: Record<string, string> = {

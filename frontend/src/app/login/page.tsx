@@ -30,8 +30,8 @@ export default function LoginPage() {
         throw new Error(data.error || 'Nao foi possivel entrar.');
       }
 
-      const next = searchParams.get('next') || '/dashboard';
-      router.replace(next.startsWith('/') ? next : '/dashboard');
+      const next = searchParams.get('next') || '/crm';
+      router.replace(next.startsWith('/') ? next : '/crm');
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao autenticar.');
