@@ -101,6 +101,25 @@ function classifyDoor(desc: string) {
   };
 }
 
+const SUB_COMPONENT_TYPES = [
+  "porta", "gaveta", "gavetão", "gavetao", "prateleira", "lateral", "divisória", 
+  "divisoria", "fundo", "saia", "rodapé", "rodape", "led", "aramado", "cuba", 
+  "revestimento", "corrediça", "puxador", "dobradiça", "rodateto"
+];
+
+function isMainFurnitureModule(item: any): boolean {
+  const type = (item.itemType || "").toLowerCase();
+  const desc = (item.description || item.name || "").toLowerCase();
+  
+  if (SUB_COMPONENT_TYPES.some(t => type === t || type.startsWith(t))) {
+    return false;
+  }
+  if (SUB_COMPONENT_TYPES.some(t => desc.startsWith(t)) && !type.includes("caixa") && !type.includes("balcão") && !type.includes("aéreo") && !type.includes("guarda-roupa") && !type.includes("armário")) {
+    return false;
+  }
+  return true;
+}
+
 // ── Decomposição de um móvel em peças planas de corte ─────────────────────────
 interface Panel {
   w: number;
@@ -286,6 +305,7 @@ export default function Projects() {
   const [selected3DItemId, setSelected3DItemId] = useState<string>("Todos");
   const [viewStyle, setViewStyle] = useState<string>("textured");
   const [doorOpenAngle, setDoorOpenAngle] = useState<number>(0);
+  const [viewMode, setViewMode] = useState<'raw' | 'all'>('raw');
 
   const canvasNestingRef = useRef<HTMLCanvasElement>(null);
 
@@ -1945,17 +1965,51 @@ export default function Projects() {
                   <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_300px]">
                     {/* Left: Ambientes e Medidas agrupados */}
                     <div>
-                      <div className="mb-4 flex items-center justify-between">
-                        <h3 className="text-lg font-semibold tracking-tight text-[#fff8f0]">
-                          Ambientes e medidas
-                        </h3>
-                        <Layers className="h-5 w-5 text-[#d6ad79]" />
+                      <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-[#e8d4b8]/10 pb-3">
+                        <div>
+                          <h3 className="text-lg font-semibold tracking-tight text-[#fff8f0]">
+                            Ambientes e medidas
+                          </h3>
+                          <p className="text-xs text-[#bba890] mt-0.5">
+                            {viewMode === 'raw' 
+                              ? "Visão Simplificada: Medidas brutas dos móveis (sem gavetas e portas)" 
+                              : "Visão Detalhada: Todas as peças e componentes fracionados"}
+                          </p>
+                        </div>
+
+                        {/* Toggle Mode Button */}
+                        <div className="flex items-center gap-1 bg-[#18120d] p-1 rounded-xl border border-[#e8d4b8]/15 shrink-0">
+                          <button
+                            onClick={() => setViewMode('raw')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                              viewMode === 'raw'
+                                ? "bg-[#ead5ba] text-[#20170f] shadow"
+                                : "text-[#bba890] hover:text-[#ead5ba]"
+                            }`}
+                          >
+                            📦 Medidas Brutas
+                          </button>
+                          <button
+                            onClick={() => setViewMode('all')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                              viewMode === 'all'
+                                ? "bg-[#ead5ba] text-[#20170f] shadow"
+                                : "text-[#bba890] hover:text-[#ead5ba]"
+                            }`}
+                          >
+                            📋 Todas as Peças ({selectedItems.length})
+                          </button>
+                        </div>
                       </div>
 
                       {selectedItems.length ? (
                         <div className="space-y-6">
                           {environments.map((env) => {
-                            const envItems = selectedItems.filter((i: any) => i.environment === env);
+                            let envItems = selectedItems.filter((i: any) => i.environment === env);
+                            if (viewMode === 'raw') {
+                              const rawOnly = envItems.filter(isMainFurnitureModule);
+                              if (rawOnly.length > 0) envItems = rawOnly;
+                            }
                             const envArea = envItems.reduce((s: number, i: any) => s + (i.area || 0), 0);
                             const envQty = envItems.reduce((s: number, i: any) => s + (i.quantity || 1), 0);
                             return (
@@ -1963,10 +2017,10 @@ export default function Projects() {
                                 <div className="mb-2.5 flex items-center justify-between gap-3 border-b border-[#e8d4b8]/10 pb-2">
                                   <h4 className="text-sm font-bold uppercase tracking-[0.14em] text-[#c89a63]">{env}</h4>
                                   <span className="shrink-0 text-[11px] text-[#a99680]">
-                                    {envItems.length} módulos · {envQty} pç · {envArea.toFixed(1)} m²
+                                    {envItems.length} móveis · {envQty} un · {envArea.toFixed(1)} m²
                                   </span>
                                 </div>
-                                <div className="space-y-3">
+                                <div className="space-y-2.5">
                                   {envItems.map((item: any) => (
                                     <ItemDetailCard key={item.id} item={item} />
                                   ))}
@@ -2646,29 +2700,65 @@ function ItemDetailCard({ item }: { item: any }) {
 
 function SimplifiedSummaryTable({ items }: { items: any[] }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [tableFilter, setTableFilter] = useState<'raw' | 'all'>('raw');
 
   if (!items || items.length === 0) return null;
+
+  const rawFiltered = items.filter(isMainFurnitureModule);
+  const displayItems = tableFilter === 'raw' 
+    ? (rawFiltered.length > 0 ? rawFiltered : items)
+    : items;
 
   return (
     <div className="rounded-2xl border border-[#e8d4b8]/15 bg-[#18120d]/80 overflow-hidden shadow-lg mt-8">
       {/* Clickable Header Toggle */}
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full p-4 flex items-center justify-between bg-[#211811]/90 hover:bg-[#281e16] transition-colors text-left border-b border-[#e8d4b8]/10"
-      >
-        <div className="flex items-center gap-2.5">
-          <Sparkles className="w-4 h-4 text-[#d6ad79]" />
-          <h3 className="text-sm font-bold tracking-wide text-[#ead5ba] uppercase">
-            Resumo Simplificado de Cotas & Módulos
-          </h3>
-          <span className="text-xs text-[#a99680] font-normal ml-2">
-            ({items.length} itens no total)
-          </span>
+      <div className="w-full p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#211811]/90 border-b border-[#e8d4b8]/10">
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="flex items-center gap-2.5 text-left flex-1 hover:opacity-90 transition-opacity"
+        >
+          <Sparkles className="w-4 h-4 text-[#d6ad79] shrink-0" />
+          <div>
+            <h3 className="text-sm font-bold tracking-wide text-[#ead5ba] uppercase flex items-center gap-2">
+              Resumo Simplificado de Cotas & Módulos
+              <span className="text-[10px] bg-[#fb923c]/15 text-[#fb923c] px-2 py-0.5 rounded-full font-bold lowercase tracking-normal">
+                {tableFilter === 'raw' ? 'medidas brutas' : 'todas as peças'}
+              </span>
+            </h3>
+            <p className="text-xs text-[#a99680] font-normal">
+              {displayItems.length} móveis listados {isOpen ? '(Clique para recolher)' : '(Clique para expandir a tabela)'}
+            </p>
+          </div>
+        </button>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1 bg-[#100b08] p-1 rounded-lg border border-[#e8d4b8]/15">
+            <button
+              onClick={() => { setTableFilter('raw'); setIsOpen(true); }}
+              className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${
+                tableFilter === 'raw' ? "bg-[#ead5ba] text-[#20170f]" : "text-[#bba890] hover:text-[#ead5ba]"
+              }`}
+            >
+              Medidas Brutas
+            </button>
+            <button
+              onClick={() => { setTableFilter('all'); setIsOpen(true); }}
+              className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${
+                tableFilter === 'all' ? "bg-[#ead5ba] text-[#20170f]" : "text-[#bba890] hover:text-[#ead5ba]"
+              }`}
+            >
+              Todas as Peças ({items.length})
+            </button>
+          </div>
+
+          <button
+            onClick={() => setIsOpen(!isOpen)}
+            className="text-xs font-bold text-[#ead5ba] hover:text-white px-2 py-1"
+          >
+            {isOpen ? '▲' : '▼'}
+          </button>
         </div>
-        <span className="text-xs font-bold text-[#ead5ba] flex items-center gap-1">
-          {isOpen ? 'Ocultar Resumo ▲' : 'Expandir Resumo ▼'}
-        </span>
-      </button>
+      </div>
 
       {/* Collapsed Table Content */}
       {isOpen && (
@@ -2686,7 +2776,7 @@ function SimplifiedSummaryTable({ items }: { items: any[] }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#e8d4b8]/10 text-[#fff8f0]">
-              {items.map((item, idx) => (
+              {displayItems.map((item, idx) => (
                 <tr key={idx} className="hover:bg-[#fff7ed]/[0.02] transition-colors">
                   <td className="py-2.5 px-3 font-semibold text-[#e8d9c6]">
                     {item.description || item.name}
