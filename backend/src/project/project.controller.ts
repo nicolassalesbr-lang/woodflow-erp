@@ -263,8 +263,16 @@ FILTRO ABSOLUTO DE ORCAMENTO:
 - Retorne somente moveis planejados/marcenaria sob medida que entram no orcamento.
 - NAO extraia eletrodomesticos, metais, loucas, decoracao ou itens de obra como itens: geladeira, refrigerador, freezer, forno, micro-ondas, cooktop, fogao, coifa, depurador, cuba, pia, torneira, tanque, cafeteira, adega/cervejeira, quadro, planta, cortina, persiana, luminaria, piso, parede, rodape da obra.
 - Nichos/vaos para eletros podem aparecer apenas em observacoes do movel que os contem (ex: "torre com vao para forno e micro-ondas"). Nunca crie o eletro como item.
-- Fotos, perspectivas e renders 3D SEM cotas numericas servem apenas como referencia visual/material. Nao crie itens orcaveis a partir deles. A lista deve vir das pranchas cotadas ou memorias com medidas explicitas.
-- Se a folha/imagem nao contem medida explicita associavel ao movel planejado, retorne {"items": []}.
+- Fotos, perspectivas e renders 3D SEM cotas numericas servem para entender QUAIS moveis planejados existem, materiais, disposicao e vao de eletros. Podem retornar moveis planejados com dimensoes null e observacao "Identificado visualmente - sem cotas nesta imagem".
+- Itens visuais sem cota NAO entram em area/chapas ate receberem medidas, mas devem aparecer como pendencia para a lista ficar coerente com as imagens do projeto.
+
+REGRA ESPECIAL PARA COZINHAS EM PLANTA BAIXA/COTADA:
+- Interprete o conjunto completo da cozinha, cruzando linhas de parede, bancadas e render/planta superior.
+- Nao resuma uma cozinha inteira em 1 ou 2 itens. Em geral, liste separadamente os conjuntos montados: aereos superiores por trecho, balcoes inferiores por trecho, torre/coluna de eletros ou despensa, armario alto/lateral, ilha/peninsula/bancada, painel/ripado quando for movel planejado.
+- Nao some trechos separados por canto, torre, parede, vao ou mudanca de profundidade em um unico "armario linear". Cada trecho fisico montado deve virar um item.
+- Para aereos superiores, use larguras cotadas por trecho (ex: 40+82+24 cm = 1460 mm; 127,4 cm = 1274 mm), altura cotada (ex: 60 cm = 600 mm) e profundidade cotada/indicada (ex: 35 cm = 350 mm) quando houver.
+- Para balcoes inferiores e ilhas, use largura do trecho, altura de bancada cotada (ex: Alt. 92 cm = 920 mm) e profundidade cotada na planta/corte. Cooktop, cuba e eletros sao apenas referencias de vao/uso.
+- Se uma dimensao faltar em um movel visivel, mantenha null nessa dimensao e explique a pendencia em observacoes; nao descarte o movel inteiro se ele existe claramente no render/planta.
 
 ═══════════════════════════════════════════════════════════════════
 REGRAS DE MEDIDAS E COTAS (OBRIGATÓRIAS)
@@ -293,7 +301,7 @@ REGRA DE CONFIABILIDADE (CRÍTICA — NUNCA VIOLE)
 ═══════════════════════════════════════════════════════════════════
 - Se uma dimensão (width, height ou depth) NÃO está cotada/escrita no desenho, retorne null para essa dimensão.
 - NUNCA invente, estime ou "adivinhe" medidas. Retorne APENAS o que está EXPLÍCITO no documento.
-- Para imagens 3D / renders / perspectivas SEM cotas numericas: NAO retorne itens para orcamento. Use essas imagens apenas como apoio visual; a extracao deve vir de prancha cotada.
+- Para imagens 3D / renders / perspectivas SEM cotas numericas: retorne os moveis planejados visiveis com width/height/depth null e observacoes claras. Eles sao pendencias visuais, nao medidas de orcamento.
 - A confiabilidade do orçamento depende 100% de medidas reais dos documentos.
 
 ═══════════════════════════════════════════════════════════════════
@@ -301,7 +309,7 @@ MÚLTIPLOS DOCUMENTOS DO MESMO PROJETO
 ═══════════════════════════════════════════════════════════════════
 - O projeto pode conter vários documentos: pranchas executivas com cotas, renders 3D, fotos de referência.
 - Cada folha/imagem será enviada individualmente. Extraia o que for possível de cada uma.
-- Se uma folha e um render 3D/foto sem cotas, retorne {"items": []}; nao gere orcamento visual.
+- Se uma folha e um render 3D/foto sem cotas, extraia os moveis planejados visiveis como itens visuais com dimensoes null, para reconciliar com as pranchas cotadas do mesmo projeto.
 - Se uma folha é uma prancha executiva com cotas, extraia as medidas reais.
 - O sistema consolidará as informações de todos os documentos automaticamente.
 
@@ -601,7 +609,7 @@ Nota: Se a dimensão não está cotada, use null:
     const userContent: any[] = [
       {
         type: 'text',
-        text: `Esta e a folha ${pageIndex + 1} de ${totalPages} de um projeto de marcenaria sob medida. Analise SOMENTE esta folha e extraia apenas MOVEIS PLANEJADOS ORCAVEIS (modulos principais/moveis montados), com medidas reais explicitas em milimetros. Nao extraia subpecas, eletrodomesticos, loucas, metais, decoracao ou itens de obra. Se for foto/render sem cotas, retorne {"items": []}.`,
+        text: `Esta e a folha ${pageIndex + 1} de ${totalPages} de um projeto de marcenaria sob medida. Analise SOMENTE esta folha e extraia apenas MOVEIS PLANEJADOS (modulos principais/moveis montados). Use medidas reais explicitas em milimetros quando houver cota. Nao extraia subpecas, eletrodomesticos, loucas, metais, decoracao ou itens de obra. Se for foto/render sem cotas, retorne os moveis planejados visiveis com dimensoes null e observacao de pendencia, sem inventar medidas.`,
       },
       {
         type: 'image_url',
@@ -715,9 +723,7 @@ Nota: Se a dimensão não está cotada, use null:
       const thickness = Math.round(t);
       const quantity = Math.max(1, Math.round(Number(raw.quantity) || 1));
 
-      // Render/foto sem cota costuma chegar com tudo nulo/zero. Isso nao e
-      // orcamento assertivo; descarte para nao inflar itens ou valores.
-      if (width === 0 && height === 0 && depth === 0) continue;
+      const visualOnly = width === 0 && height === 0 && depth === 0;
 
       // Métricas derivadas (só calcula se tiver dimensões reais)
       const hasRealDims = width > 0 && height > 0;
@@ -727,6 +733,9 @@ Nota: Se a dimensão não está cotada, use null:
       // Adicionar aviso se dimensões estão ausentes
       const missingDims = [w === 0 && 'largura', h === 0 && 'altura', d === 0 && 'profundidade'].filter(Boolean);
       let obs = raw.observacoes ? String(raw.observacoes).substring(0, 400) : '';
+      if (visualOnly && !/visual|render|sem cota|sem medida|pendencia/i.test(obs)) {
+        obs = obs ? `${obs} | Identificado visualmente - sem cotas nesta imagem.` : 'Identificado visualmente - sem cotas nesta imagem.';
+      }
       if (missingDims.length > 0) {
         const warning = `⚠ Medidas não cotadas no documento (${missingDims.join(', ')}). Verificar prancha executiva.`;
         obs = obs ? `${obs} | ${warning}` : warning;
@@ -789,6 +798,7 @@ Nota: Se a dimensão não está cotada, use null:
         Math.round((it.width || 0) / 10),   // tolerância de 1cm
         Math.round((it.height || 0) / 10),
         Math.round((it.depth || 0) / 10),
+        (it.width || 0) + (it.height || 0) + (it.depth || 0) === 0 ? this.normKey(it.description) : '',
       ].join('|');
       const ex = map.get(key);
       if (ex) {
