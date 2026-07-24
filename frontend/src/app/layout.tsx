@@ -90,11 +90,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="min-h-screen bg-[radial-gradient(circle_at_10%_0%,rgba(207,158,99,0.16),transparent_32%),linear-gradient(135deg,#1e160f_0%,#18120d_42%,#0b0907_100%)]">
             <div className="flex min-h-screen w-full">
               {/* Sidebar Navigation - Flush to left edge */}
-              <aside className="hidden w-72 shrink-0 border-r border-[#e8d4b8]/10 bg-[#211811]/92 px-5 py-5 backdrop-blur-xl lg:flex lg:flex-col">
+              <aside className="hidden w-20 shrink-0 border-r border-[#e8d4b8]/10 bg-[#211811]/92 px-3 py-5 backdrop-blur-xl lg:flex lg:flex-col">
                 {/* Logo */}
-                <div className="mb-8 flex items-center gap-3 px-2">
+                <div className="mb-8 flex justify-center">
                   <Logo />
-                  <div>
+                  <div className="sr-only">
                     <h1 className="text-xl font-semibold tracking-tight text-[#fff8f0]">KazaHomeDesign</h1>
                     <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-[#c89a63]">moveis sob medida</p>
                   </div>
@@ -108,6 +108,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                       item={item}
                       pathname={pathname}
                       onClick={() => setMobileMenuOpen(false)}
+                      rail
                     />
                   ))}
                 </nav>
@@ -116,17 +117,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <div className="space-y-3 border-t border-[#e8d4b8]/10 pt-4">
                   <button
                     onClick={() => setCopilotOpen(true)}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#ead5ba] px-4 py-3 text-sm font-bold text-[#20170f] transition hover:bg-[#ffe4bf]"
+                    className="flex w-full items-center justify-center rounded-xl bg-[#ead5ba] p-3 text-sm font-bold text-[#20170f] transition hover:bg-[#ffe4bf]"
+                    title="Assistente Kaza"
+                    aria-label="Assistente Kaza"
                   >
                     <Bot className="h-4 w-4" />
-                    Assistente Kaza
+                    <span className="sr-only">Assistente Kaza</span>
                   </button>
                   <button
                     onClick={logout}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] px-4 py-2.5 text-sm font-semibold text-[#bba890] transition hover:text-[#fff8f0]"
+                    className="flex w-full items-center justify-center rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] p-3 text-sm font-semibold text-[#bba890] transition hover:text-[#fff8f0]"
+                    title="Sair"
+                    aria-label="Sair"
                   >
                     <LogOut className="h-4 w-4" />
-                    Sair
+                    <span className="sr-only">Sair</span>
                   </button>
                 </div>
               </aside>
@@ -208,24 +213,26 @@ function NavLink({
   item, 
   pathname, 
   onClick, 
-  compact = false 
+  compact = false,
+  rail = false
 }: { 
   item: typeof navItems[0]; 
   pathname: string; 
   onClick: () => void; 
   compact?: boolean;
+  rail?: boolean;
 }) {
   const isActive = pathname === item.path || Boolean(pathname?.startsWith(`${item.path}/`));
   const Icon = item.icon;
   return (
-    <Link href={item.path} onClick={onClick}>
+    <Link href={item.path} onClick={onClick} title={rail ? item.name : undefined}>
       <span className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm font-semibold transition ${
         isActive 
           ? "border-[#d6ad79]/35 bg-[#d6ad79]/14 text-[#fff8f0] shadow-[0_14px_32px_rgba(0,0,0,0.18)]" 
           : "border-transparent text-[#bba890] hover:border-[#e8d4b8]/12 hover:bg-[#fff7ed]/[0.05] hover:text-[#fff8f0]"
-      } ${compact ? "justify-center px-3 text-xs" : ""}`}>
+      } ${(compact || rail) ? "justify-center px-3 text-xs" : ""}`}>
         <Icon className="h-4 w-4" />
-        {item.name}
+        <span className={rail ? "sr-only" : ""}>{item.name}</span>
       </span>
     </Link>
   );
