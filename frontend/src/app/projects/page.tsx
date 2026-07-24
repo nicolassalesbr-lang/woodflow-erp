@@ -1920,6 +1920,7 @@ export default function Projects() {
                 >
                   📋 Detalhes
                 </button>
+                {false && (
                 <button
                   onClick={() => setActiveTab("model3d")}
                   className={`border-b-2 px-5 py-3 text-sm font-bold transition ${
@@ -1930,6 +1931,7 @@ export default function Projects() {
                 >
                   📐 Modelo 3D
                 </button>
+                )}
                 <button
                   onClick={() => setActiveTab("budgeting")}
                   className={`border-b-2 px-5 py-3 text-sm font-bold transition ${

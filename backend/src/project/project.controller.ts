@@ -458,25 +458,75 @@ Nota: Se a dimensão não está cotada, use null:
   /** Parse the model's JSON content into an items array, tolerating various shapes. */
   private extractItemsFromContent(content: string | null): any[] {
     if (!content) return [];
-    try {
-      let clean = content.trim();
+    const normalizeJsonText = (value: string): string => {
+      let clean = value.trim();
       if (clean.startsWith('```json')) clean = clean.slice(7);
       if (clean.startsWith('```')) clean = clean.slice(3);
       if (clean.endsWith('```')) clean = clean.slice(0, -3);
-      clean = clean.trim();
+      return clean.trim();
+    };
 
-      let parsed: any = JSON.parse(clean);
+    const unwrapItems = (parsed: any): any[] => {
       if (parsed && !Array.isArray(parsed)) {
-        if (Array.isArray(parsed.items)) parsed = parsed.items;
-        else if (Array.isArray(parsed.pecas)) parsed = parsed.pecas;
-        else {
-          for (const key of Object.keys(parsed)) {
-            if (Array.isArray(parsed[key])) { parsed = parsed[key]; break; }
-          }
+        if (Array.isArray(parsed.items)) return parsed.items;
+        if (Array.isArray(parsed.pecas)) return parsed.pecas;
+        for (const key of Object.keys(parsed)) {
+          if (Array.isArray(parsed[key])) return parsed[key];
         }
       }
       return Array.isArray(parsed) ? parsed : [];
+    };
+
+    const salvageCompleteObjects = (clean: string): any[] => {
+      const start = clean.indexOf('[');
+      if (start < 0) return [];
+      const out: any[] = [];
+      let depth = 0;
+      let inString = false;
+      let escaped = false;
+      let objectStart = -1;
+
+      for (let i = start; i < clean.length; i++) {
+        const ch = clean[i];
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (ch === '\\') escaped = true;
+          else if (ch === '"') inString = false;
+          continue;
+        }
+        if (ch === '"') {
+          inString = true;
+          continue;
+        }
+        if (ch === '{') {
+          if (depth === 0) objectStart = i;
+          depth++;
+        } else if (ch === '}') {
+          depth--;
+          if (depth === 0 && objectStart >= 0) {
+            const rawObject = clean.slice(objectStart, i + 1).replace(/,\s*([}\]])/g, '$1');
+            try {
+              out.push(JSON.parse(rawObject));
+            } catch {
+              // Ignore only this object; later complete objects may still be valid.
+            }
+            objectStart = -1;
+          }
+        }
+      }
+      return out;
+    };
+
+    try {
+      const clean = normalizeJsonText(content);
+      return unwrapItems(JSON.parse(clean));
     } catch (err) {
+      const clean = normalizeJsonText(content);
+      const salvaged = salvageCompleteObjects(clean);
+      if (salvaged.length > 0) {
+        console.warn(`[AI Reader] JSON parse failed, salvaged ${salvaged.length} complete item(s) from partial response.`);
+        return salvaged;
+      }
       console.error('[AI Reader] JSON parse failed:', err, '| raw:', content.substring(0, 200));
       return [];
     }
@@ -495,12 +545,12 @@ Nota: Se a dimensão não está cotada, use null:
   }
 
   /**
-   * Envia o PDF ao modelo prebuilt-layout do Azure Document Intelligence e retorna,
+   * Envia PDF/imagem ao modelo prebuilt-layout do Azure Document Intelligence e retorna,
    * por página (índice 0-based), um contexto estruturado (texto OCR + tabelas em
    * markdown + cotas numéricas com posição). Retorna [] se não configurado ou em
    * caso de falha — o pipeline então segue só com a imagem (fallback silencioso).
    */
-  private async analyzeLayout(pdfBuffer: Buffer): Promise<string[]> {
+  private async analyzeLayout(fileBuffer: Buffer, contentType: string = 'application/pdf'): Promise<string[]> {
     const di = this.getDocIntelConfig();
     if (!di) return [];
 
@@ -513,8 +563,8 @@ Nota: Se a dimensão não está cotada, use null:
     try {
       const submit = await fetch(`${di.endpoint}${analyzePath}`, {
         method: 'POST',
-        headers: { 'Ocp-Apim-Subscription-Key': di.key, 'Content-Type': 'application/pdf' },
-        body: pdfBuffer as any,
+        headers: { 'Ocp-Apim-Subscription-Key': di.key, 'Content-Type': contentType || 'application/octet-stream' },
+        body: fileBuffer as any,
       });
       if (submit.status !== 202) {
         console.warn('[Doc Intelligence] submit falhou:', submit.status, (await submit.text()).slice(0, 200));
@@ -610,7 +660,7 @@ Nota: Se a dimensão não está cotada, use null:
     const userContent: any[] = [
       {
         type: 'text',
-        text: `Esta e a folha ${pageIndex + 1} de ${totalPages} de um projeto de marcenaria sob medida. Analise SOMENTE esta folha e extraia apenas MOVEIS PLANEJADOS (modulos principais/moveis montados). Use medidas reais explicitas em milimetros quando houver cota. Nao extraia subpecas, eletrodomesticos, loucas, metais, decoracao ou itens de obra. Se for foto/render sem cotas, retorne os moveis planejados visiveis com dimensoes null e observacao de pendencia, sem inventar medidas.`,
+        text: `Esta e a folha ${pageIndex + 1} de ${totalPages} de um projeto de marcenaria sob medida. Analise SOMENTE esta folha e extraia apenas MOVEIS PLANEJADOS (modulos principais/moveis montados). Use medidas reais explicitas em milimetros quando houver cota. Nao extraia subpecas, eletrodomesticos, loucas, metais, decoracao ou itens de obra. Se for foto/render sem cotas, retorne os moveis planejados visiveis com dimensoes null e observacao de pendencia, sem inventar medidas. Priorize no maximo 12 moveis montados por folha para evitar JSON truncado. Nao use medidas assumidas, estimadas ou aproximadas.`,
       },
       {
         type: 'image_url',
@@ -625,7 +675,9 @@ Nota: Se a dimensão não está cotada, use null:
           `\n\nDADOS ESTRUTURADOS DESTA FOLHA (extraídos por OCR/layout do Azure Document Intelligence). ` +
           `Use estes VALORES como fonte da verdade para as cotas exatas e cruze-os com a imagem para associar cada cota ao movel correto ` +
           `(pela proximidade das posições x,y). Ainda assim aplique a regra cm→mm (×10). ` +
-          `Se uma medida nao tiver cota correspondente, use null ou omita o item; nunca registre medida estimada.\n\n${structuredContext}`,
+          `Se uma medida nao tiver cota correspondente, use null ou omita o item; nunca registre medida estimada. ` +
+          `Para evitar JSON longo/truncado, priorize no maximo 12 MOVEIS MONTADOS desta folha e ignore subpecas. ` +
+          `Nao use as palavras "assumida", "estimada" ou "aproximada": cada width/height/depth precisa vir de cota visivel ou texto OCR.\n\n${structuredContext}`,
       });
     }
 
@@ -634,7 +686,7 @@ Nota: Se a dimensão não está cotada, use null:
       { role: 'user', content: userContent },
     ];
 
-    const content = await this.callVision(cfg, messages, 8192);
+    const content = await this.callVision(cfg, messages, 12000);
     console.log(`[AI Reader] Sheet ${pageIndex + 1} raw content snippet:`, content ? (content.length > 500 ? content.substring(0, 500) + '...' : content) : 'NULL');
     const items = this.extractItemsFromContent(content).map((item) => ({
       ...item,
@@ -1178,9 +1230,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
 
         // CAMADA 1: Azure Document Intelligence (se configurado)
         let pageContexts: string[] = [];
-        if (isPdf) {
-          pageContexts = await this.analyzeLayout(buffer);
-        }
+        pageContexts = await this.analyzeLayout(buffer, isPdf ? 'application/pdf' : file.mimeType);
         sourceFiles.push({
           filename: fname,
           mimeType: file.mimeType,
@@ -1238,9 +1288,10 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
       const sanitized = this.sanitizeItems(allRawItems);
       const deduplicated = this.dedupeItems(sanitized);
       const interpretation = buildProjectInterpretation(deduplicated, sourceFiles);
+      const quoteReadyItems = deduplicated.filter((item) => item.width > 0 && item.height > 0 && item.depth > 0);
       isRealParsing = deduplicated.length > 0;
       console.log(`[Interpretation] ${interpretation.summary.furnitureItems} movel(is), ${interpretation.summary.readyToQuote} pronto(s), ${interpretation.summary.pendingMeasurements} pendente(s), status=${interpretation.validation.status}.`);
-      console.log(`[AI Reader] Batch consolidado: ${allRawItems.length} raw → ${sanitized.length} sanitized → ${deduplicated.length} deduplicated item(s).`);
+      console.log(`[AI Reader] Batch consolidado: ${allRawItems.length} raw → ${sanitized.length} sanitized → ${deduplicated.length} deduplicated → ${quoteReadyItems.length} quote-ready item(s).`);
 
       // Persist the extracted pieces.
       await this.prisma.project.update({
@@ -1249,7 +1300,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
       });
 
       const items = [];
-      for (const item of deduplicated) {
+      for (const item of quoteReadyItems) {
         const createdItem = await this.prisma.projectItem.create({
           data: {
             projectId: id,
@@ -1276,12 +1327,12 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
       const uniqueEnvironments = Array.from(new Set(items.map((i) => i.environment)));
 
       if (!parseError && items.length === 0) {
-        parseError = 'Nenhuma peça extraída dos documentos — verifique os créditos/configuração do provedor de IA e reprocesse.';
+        parseError = 'Nenhum movel com medidas completas foi extraido. Verifique se a prancha cotada esta legivel e reprocesse.';
       }
 
       // FASE SEMÂNTICA: Digital Twin
       let digitalTwin: any = null;
-      if (!parseError && items.length > 0) {
+      if (!parseError && items.length > 0 && process.env.ENABLE_DIGITAL_TWIN === 'true') {
         try {
           const cfgTwin = this.getVisionConfig();
           if (cfgTwin) {
