@@ -259,6 +259,13 @@ Exemplos de Móveis Montados Inteiros:
 - Painel de Cabeceira / Painel de TV (ex: L 2840 x A 1300 x P 50 mm)
 - Penteadeira / Escrivaninha / Mesa (ex: L 2620 x A 450 x P 450 mm)
 
+FILTRO ABSOLUTO DE ORCAMENTO:
+- Retorne somente moveis planejados/marcenaria sob medida que entram no orcamento.
+- NAO extraia eletrodomesticos, metais, loucas, decoracao ou itens de obra como itens: geladeira, refrigerador, freezer, forno, micro-ondas, cooktop, fogao, coifa, depurador, cuba, pia, torneira, tanque, cafeteira, adega/cervejeira, quadro, planta, cortina, persiana, luminaria, piso, parede, rodape da obra.
+- Nichos/vaos para eletros podem aparecer apenas em observacoes do movel que os contem (ex: "torre com vao para forno e micro-ondas"). Nunca crie o eletro como item.
+- Fotos, perspectivas e renders 3D SEM cotas numericas servem apenas como referencia visual/material. Nao crie itens orcaveis a partir deles. A lista deve vir das pranchas cotadas ou memorias com medidas explicitas.
+- Se a folha/imagem nao contem medida explicita associavel ao movel planejado, retorne {"items": []}.
+
 ═══════════════════════════════════════════════════════════════════
 REGRAS DE MEDIDAS E COTAS (OBRIGATÓRIAS)
 ═══════════════════════════════════════════════════════════════════
@@ -286,7 +293,7 @@ REGRA DE CONFIABILIDADE (CRÍTICA — NUNCA VIOLE)
 ═══════════════════════════════════════════════════════════════════
 - Se uma dimensão (width, height ou depth) NÃO está cotada/escrita no desenho, retorne null para essa dimensão.
 - NUNCA invente, estime ou "adivinhe" medidas. Retorne APENAS o que está EXPLÍCITO no documento.
-- Para imagens 3D / renders / perspectivas SEM cotas numéricas: identifique os móveis visíveis, mas retorne width/height/depth como null e adicione em observacoes: "Medidas ausentes — verificar prancha executiva com cotas".
+- Para imagens 3D / renders / perspectivas SEM cotas numericas: NAO retorne itens para orcamento. Use essas imagens apenas como apoio visual; a extracao deve vir de prancha cotada.
 - A confiabilidade do orçamento depende 100% de medidas reais dos documentos.
 
 ═══════════════════════════════════════════════════════════════════
@@ -294,7 +301,7 @@ MÚLTIPLOS DOCUMENTOS DO MESMO PROJETO
 ═══════════════════════════════════════════════════════════════════
 - O projeto pode conter vários documentos: pranchas executivas com cotas, renders 3D, fotos de referência.
 - Cada folha/imagem será enviada individualmente. Extraia o que for possível de cada uma.
-- Se uma folha é um render 3D sem cotas, identifique os móveis mas marque dimensões como null.
+- Se uma folha e um render 3D/foto sem cotas, retorne {"items": []}; nao gere orcamento visual.
 - Se uma folha é uma prancha executiva com cotas, extraia as medidas reais.
 - O sistema consolidará as informações de todos os documentos automaticamente.
 
@@ -594,7 +601,7 @@ Nota: Se a dimensão não está cotada, use null:
     const userContent: any[] = [
       {
         type: 'text',
-        text: `Esta é a folha ${pageIndex + 1} de ${totalPages} de um projeto executivo de marcenaria sob medida. Analise SOMENTE esta folha e extraia TODAS as peças (módulo principal e cada subpeça) com suas medidas reais de fabricação em milímetros.`,
+        text: `Esta e a folha ${pageIndex + 1} de ${totalPages} de um projeto de marcenaria sob medida. Analise SOMENTE esta folha e extraia apenas MOVEIS PLANEJADOS ORCAVEIS (modulos principais/moveis montados), com medidas reais explicitas em milimetros. Nao extraia subpecas, eletrodomesticos, loucas, metais, decoracao ou itens de obra. Se for foto/render sem cotas, retorne {"items": []}.`,
       },
       {
         type: 'image_url',
@@ -607,9 +614,9 @@ Nota: Se a dimensão não está cotada, use null:
         type: 'text',
         text:
           `\n\nDADOS ESTRUTURADOS DESTA FOLHA (extraídos por OCR/layout do Azure Document Intelligence). ` +
-          `Use estes VALORES como fonte da verdade para as cotas exatas e cruze-os com a imagem para associar cada cota à peça correta ` +
+          `Use estes VALORES como fonte da verdade para as cotas exatas e cruze-os com a imagem para associar cada cota ao movel correto ` +
           `(pela proximidade das posições x,y). Ainda assim aplique a regra cm→mm (×10). ` +
-          `Se uma medida não tiver cota correspondente aqui, registre "medida estimada" em observacoes.\n\n${structuredContext}`,
+          `Se uma medida nao tiver cota correspondente, use null ou omita o item; nunca registre medida estimada.\n\n${structuredContext}`,
       });
     }
 
@@ -654,12 +661,42 @@ Nota: Se a dimensão não está cotada, use null:
    * replace any 0 primary dimension with the panel thickness so the 3D engine
    * renders a real board instead of a flat plane.
    */
+  private isFurnitureContainerText(text: string): boolean {
+    return /\b(armario|aereo|balcao|bancada|base|torre|ilha|painel|gabinete|modulo|movel|roupeiro|guarda roupa|guarda-roupa|nicho|coluna|cristaleira|penteadeira|mesa|estante|rack|aparador|closet|despensa)\b/.test(text);
+  }
+
+  private isNonQuoteableItem(raw: any): boolean {
+    const text = this.normKey([
+      raw?.description,
+      raw?.itemType,
+      raw?.environment,
+      raw?.observacoes,
+    ].filter(Boolean).join(' '));
+
+    if (!text) return true;
+
+    const hasFurnitureContainer = this.isFurnitureContainerText(text);
+    const nonQuoteable =
+      /\b(geladeira|refrigerador|freezer|forno|micro ondas|microondas|micro-ondas|cooktop|fogao|coifa|depurador|lava loucas|lava-loucas|cuba|pia|torneira|tanque|cafeteira|adega|cervejeira|eletrodomestico|eletrodomesticos|eletro|tv|televisao|quadro|planta|vaso|cortina|persiana|luminaria|luz|spot|piso|parede|revestimento da parede|rodape da obra|soleira|bancada de pedra solta|granito|quartzo solto)\b/.test(text);
+
+    // "Torre de eletros" and "armario para forno" are furniture; the appliance
+    // is only a void/reference and must stay in notes.
+    return nonQuoteable && !hasFurnitureContainer;
+  }
+
+  private isSubPieceOnly(raw: any): boolean {
+    const text = this.normKey([raw?.description, raw?.itemType].filter(Boolean).join(' '));
+    if (this.isFurnitureContainerText(text)) return false;
+    return /\b(porta|frente|gaveta|gavetao|prateleira|divisoria|fundo|lateral|tampo|puxador|corredica|dobradica|trilho|roldana|fita led|led|perfil|ripa|sarrafo|rodape|rodateto|saia)\b/.test(text);
+  }
+
   private sanitizeItems(rawItems: any[]): any[] {
     const out: any[] = [];
     for (const raw of rawItems) {
       if (!raw || typeof raw !== 'object') continue;
       const desc = String(raw.description || raw.itemType || '').trim();
       if (!desc || desc.length < 2) continue;
+      if (this.isNonQuoteableItem(raw) || this.isSubPieceOnly(raw)) continue;
 
       const num = (v: any) => {
         const n = Number(v);
@@ -677,6 +714,10 @@ Nota: Se a dimensão não está cotada, use null:
       const depth = Math.round(d);
       const thickness = Math.round(t);
       const quantity = Math.max(1, Math.round(Number(raw.quantity) || 1));
+
+      // Render/foto sem cota costuma chegar com tudo nulo/zero. Isso nao e
+      // orcamento assertivo; descarte para nao inflar itens ou valores.
+      if (width === 0 && height === 0 && depth === 0) continue;
 
       // Métricas derivadas (só calcula se tiver dimensões reais)
       const hasRealDims = width > 0 && height > 0;
@@ -721,7 +762,7 @@ Nota: Se a dimensão não está cotada, use null:
   private normKey(s: string): string {
     return (s || '')
       .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
+      .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
       .replace(/\s+/g, ' ')
       .trim();
