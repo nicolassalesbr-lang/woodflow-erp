@@ -311,6 +311,7 @@ export default function Projects() {
 
   const selectedItems = selectedProj?.items || [];
   const interpretation = selectedProj?.digitalTwin?.interpretation;
+  const engineering = budget?.engineering || selectedProj?.digitalTwin?.engineering || null;
   
   const environments = useMemo(() => {
     const names = selectedItems.map((item: any) => item.environment);
@@ -493,7 +494,10 @@ export default function Projects() {
           margin,
           commission,
           taxPercent,
-          wastePercent
+          wastePercent,
+          sheetPrice,
+          edgePricePerMeter: edgePrice,
+          laborPricePerHour: Math.round(laborPrice / 0.85)
         })
       });
       if (res.ok) {
@@ -2399,6 +2403,81 @@ export default function Projects() {
               {/* TAB 3: BUDGET & CUTTING LAYOUT */}
               {activeTab === "budgeting" && (
                 <div className="space-y-6">
+                  {engineering && (
+                    <section className="rounded-xl border border-[#e8d4b8]/10 bg-[#211811]/55 p-5">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#c89a63]">
+                            Engenharia tecnica
+                          </p>
+                          <h3 className="mt-1 text-lg font-semibold text-[#fff8f0]">
+                            Lista de componentes calculada por regras
+                          </h3>
+                          <p className="mt-1 max-w-3xl text-xs text-[#bba890]">
+                            A IA identifica os moveis medidos. O consumo, ferragens, chapas, fita e custo sao calculados por motor deterministico.
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          <MiniStat label="Componentes" value={engineering.summary?.components || 0} />
+                          <MiniStat label="Paineis" value={engineering.summary?.panels || 0} />
+                          <MiniStat label="Fita" value={`${Number(engineering.summary?.edgeMeters || 0).toFixed(0)} m`} />
+                          <MiniStat label="Chapas" value={engineering.summary?.sheets || 0} />
+                        </div>
+                      </div>
+
+                      <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_360px]">
+                        <div className="overflow-hidden rounded-lg border border-[#e8d4b8]/10">
+                          <div className="grid grid-cols-[1fr_90px_90px_90px] gap-2 bg-[#18120d] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[#a99680]">
+                            <span>Componente</span>
+                            <span className="text-right">Consumo</span>
+                            <span className="text-right">Unid.</span>
+                            <span className="text-right">Custo</span>
+                          </div>
+                          <div className="max-h-64 overflow-y-auto">
+                            {(engineering.components || []).slice(0, 36).map((component: any, idx: number) => (
+                              <div key={`${component.code || idx}`} className="grid grid-cols-[1fr_90px_90px_90px] gap-2 border-t border-[#e8d4b8]/6 px-3 py-2 text-xs text-[#ead5ba]">
+                                <div className="min-w-0">
+                                  <p className="truncate font-semibold text-[#fff8f0]">{component.label}</p>
+                                  <p className="truncate text-[11px] text-[#a99680]">{component.furniture}</p>
+                                </div>
+                                <span className="text-right font-mono">{Number(component.consumption || 0).toFixed(component.unit === "un" ? 0 : 2)}</span>
+                                <span className="text-right">{component.unit}</span>
+                                <span className="text-right font-semibold">{brl(component.totalCost || 0)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg border border-[#e8d4b8]/10 bg-[#18120d]/45 p-4">
+                          <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#c89a63]">
+                            Materiais calculados
+                          </p>
+                          <div className="mt-3 space-y-2">
+                            {(engineering.materials || []).map((material: any) => (
+                              <div key={material.material} className="flex items-start justify-between gap-3 text-xs">
+                                <div className="min-w-0">
+                                  <p className="truncate font-semibold text-[#fff8f0]">{material.material}</p>
+                                  <p className="text-[#a99680]">{Number(material.panelAreaM2 || 0).toFixed(2)} m2 de paineis</p>
+                                </div>
+                                <div className="text-right text-[#ead5ba]">
+                                  <p className="font-semibold">{material.sheets} ch</p>
+                                  <p className="text-[#a99680]">{brl(material.cost || 0)}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          {!!engineering.validations?.length && (
+                            <div className="mt-4 rounded-lg border border-[#fb923c]/20 bg-[#fb923c]/10 p-3 text-xs text-[#ffd7aa]">
+                              {engineering.validations.slice(0, 3).map((issue: any, idx: number) => (
+                                <p key={idx}>{issue.message}</p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </section>
+                  )}
+
                   {/* Calculations setup */}
                   <section className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_380px]">
                     {/* Left: Interactive nesting canvas */}

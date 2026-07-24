@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Patch, Body, Param, Headers, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { JwtService } from '@nestjs/jwt';
+import { buildEngineeringResult } from '../project/engineering-pricing.engine';
 
 @Controller('budgets')
 export class BudgetController {
@@ -25,51 +26,53 @@ export class BudgetController {
     }
   }
 
+  private getProjectEngineering(project: any): any | null {
+    const twin = project?.digitalTwin && typeof project.digitalTwin === 'object' ? project.digitalTwin as any : null;
+    return twin?.engineering || null;
+  }
+
   private getSqmDetails(project: any, sqmValue: number): any[] {
-    let sqmItemsDetail: any[] = [];
-    if (project.digitalTwin && (project.digitalTwin as any).environments) {
-      const environments = (project.digitalTwin as any).environments;
+    const sqmItemsDetail: any[] = [];
+    const environments = (project.digitalTwin as any)?.environments;
+    if (Array.isArray(environments) && environments.length > 0) {
       for (const env of environments) {
         if (!env.furnitures) continue;
         for (const furn of env.furnitures) {
           if (!furn.dimensions || !furn.dimensions.width || !furn.dimensions.height) continue;
-          const w = furn.dimensions.width / 1000;
-          const h = furn.dimensions.height / 1000;
-          const area = w * h;
+          const area = (furn.dimensions.width / 1000) * (furn.dimensions.height / 1000);
           sqmItemsDetail.push({
-            name: furn.name || furn.type || 'Móvel',
+            name: furn.name || furn.type || 'Movel',
             environment: env.name,
             type: furn.type,
             width: furn.dimensions.width,
             height: furn.dimensions.height,
             depth: furn.dimensions.depth,
             area: Math.round(area * 100) / 100,
-            price: Math.round(area * sqmValue * 100) / 100
+            price: Math.round(area * sqmValue * 100) / 100,
           });
         }
       }
-    } else {
-      const moduleTypes = [
-        'caixa', 'aéreo', 'aereo', 'guarda-roupa', 'guarda-roupa', 'balcão', 'balcao',
-        'estante', 'painel', 'cabeceira', 'mesa', 'cama', 'nicho', 'bancada'
-      ];
-      for (const item of project.items) {
-        const typeLower = item.itemType.toLowerCase();
-        if (moduleTypes.includes(typeLower) || moduleTypes.some(mt => typeLower.includes(mt))) {
-          const w = item.width / 1000;
-          const h = item.height / 1000;
-          const area = w * h * item.quantity;
-          sqmItemsDetail.push({
-            name: item.description || item.itemType,
-            environment: item.environment,
-            type: item.itemType,
-            width: item.width,
-            height: item.height,
-            depth: item.depth,
-            area: Math.round(area * 100) / 100,
-            price: Math.round(area * sqmValue * 100) / 100
-          });
-        }
+      return sqmItemsDetail;
+    }
+
+    const moduleTypes = [
+      'caixa', 'aereo', 'armario', 'guarda-roupa', 'balcao',
+      'estante', 'painel', 'cabeceira', 'mesa', 'cama', 'nicho', 'bancada',
+    ];
+    for (const item of project.items) {
+      const typeLower = String(item.itemType || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      if (moduleTypes.some((moduleType) => typeLower.includes(moduleType))) {
+        const area = (item.width / 1000) * (item.height / 1000) * item.quantity;
+        sqmItemsDetail.push({
+          name: item.description || item.itemType,
+          environment: item.environment,
+          type: item.itemType,
+          width: item.width,
+          height: item.height,
+          depth: item.depth,
+          area: Math.round(area * 100) / 100,
+          price: Math.round(area * sqmValue * 100) / 100,
+        });
       }
     }
     return sqmItemsDetail;
@@ -91,14 +94,15 @@ export class BudgetController {
       include: { items: true },
     });
 
-    return budgets.map(b => {
-      if (b.pricingMethod === 'SQM' && project) {
+    return budgets.map((budget) => {
+      if (budget.pricingMethod === 'SQM' && project) {
         return {
-          ...b,
-          sqmItemsDetail: this.getSqmDetails(project, b.sqmValue)
+          ...budget,
+          engineering: this.getProjectEngineering(project),
+          sqmItemsDetail: this.getSqmDetails(project, budget.sqmValue),
         };
       }
-      return b;
+      return { ...budget, engineering: this.getProjectEngineering(project) };
     });
   }
 
@@ -116,7 +120,10 @@ export class BudgetController {
       margin = 30.0,
       commission = 5.0,
       taxPercent = 6.0,
-      wastePercent = 10.0
+      wastePercent = 10.0,
+      sheetPrice,
+      edgePricePerMeter,
+      laborPricePerHour,
     } = body;
 
     const project = await this.prisma.project.findFirst({
@@ -127,7 +134,6 @@ export class BudgetController {
     if (!project) {
       throw new HttpException('Project not found', HttpStatus.NOT_FOUND);
     }
-
     if (project.items.length === 0) {
       throw new HttpException('No items found in project. Please run AI parser first.', HttpStatus.BAD_REQUEST);
     }
@@ -138,46 +144,46 @@ export class BudgetController {
     let totalLaborCost = 0;
     let totalSqmArea = 0;
     let sqmItemsDetail: any[] = [];
+    let engineering: any = null;
 
     if (pricingMethod === 'SQM') {
       sqmItemsDetail = this.getSqmDetails(project, sqmValue);
       totalSqmArea = sqmItemsDetail.reduce((sum, item) => sum + item.area, 0);
       const basePrice = totalSqmArea * sqmValue;
-
-      // Price = BasePrice / (1 - Commission/100 - Tax/100)
       const priceRatio = 1 - (commission / 100) - (taxPercent / 100);
       finalPrice = basePrice / (priceRatio > 0.1 ? priceRatio : 0.5);
     } else {
-      // Traditional cost-based calculation
-      const SHEET_AREA = 5.06 * 1000000; // mm²
-      let totalSurfaceArea = 0;
+      engineering = buildEngineeringResult(project.items, {
+        projectId,
+        sheetPrice,
+        edgePricePerMeter,
+        laborPricePerHour,
+        wastePercent,
+        markup,
+        commissionPercent: commission,
+        taxPercent,
+      });
+      adjustedSheets = engineering.summary.sheets;
+      totalHardwareCost = engineering.components
+        .filter((component: any) => component.type === 'hardware')
+        .reduce((sum: number, component: any) => sum + component.totalCost, 0);
+      totalLaborCost = engineering.components
+        .filter((component: any) => component.type === 'labor')
+        .reduce((sum: number, component: any) => sum + component.totalCost, 0);
+      finalPrice = engineering.summary.salePrice;
 
-      for (const item of project.items) {
-        if (item.itemType.toLowerCase().includes('ferragem') || item.itemType.toLowerCase().includes('puxador')) {
-          if (item.materialType.toLowerCase().includes('dobradiça')) {
-            totalHardwareCost += 15.0 * item.quantity;
-          } else if (item.materialType.toLowerCase().includes('corrediça')) {
-            totalHardwareCost += 40.0 * item.quantity;
-          } else {
-            totalHardwareCost += 25.0 * item.quantity;
-          }
-        } else {
-          const partArea = item.width * item.height * item.quantity;
-          totalSurfaceArea += partArea;
-          totalLaborCost += 45.0 * item.quantity;
-        }
-      }
-
-      const rawSheetsNeeded = totalSurfaceArea / SHEET_AREA;
-      adjustedSheets = Math.ceil(rawSheetsNeeded * (1 + wastePercent / 100));
-      const mdfSheetCost = adjustedSheets * 280.0;
-
-      const rawCost = mdfSheetCost + totalHardwareCost + totalLaborCost;
-      const costRatio = 1 - (margin / 100) - (commission / 100) - (taxPercent / 100);
-      finalPrice = rawCost * markup / (costRatio > 0.1 ? costRatio : 0.5);
+      const previousTwin = project.digitalTwin && typeof project.digitalTwin === 'object' ? project.digitalTwin as any : {};
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: {
+          digitalTwin: {
+            ...previousTwin,
+            engineering,
+          },
+        },
+      });
     }
 
-    // Check latest version number
     const latestBudget = await this.prisma.budget.findFirst({
       where: { projectId, tenantId },
       orderBy: { version: 'desc' },
@@ -203,19 +209,18 @@ export class BudgetController {
       },
     });
 
-    // Update Lead timeline if project has a linked lead
     if (project.leadId) {
       const formattedPrice = budget.finalPrice.toLocaleString('pt-BR');
       const pricingDesc = pricingMethod === 'SQM'
-        ? `baseado em m² (Valor/m²: R$ ${sqmValue.toLocaleString('pt-BR')}, Área Total: ${totalSqmArea.toFixed(2)}m²)`
-        : `detalhado por custo (MDF chapas: ${adjustedSheets}, Markup: ${markup}x)`;
+        ? `baseado em m2 (Valor/m2: R$ ${sqmValue.toLocaleString('pt-BR')}, Area Total: ${totalSqmArea.toFixed(2)}m2)`
+        : `por engenharia tecnica (${adjustedSheets} chapa(s), ${engineering?.summary?.components || 0} componente(s), markup: ${markup}x)`;
 
       await this.prisma.leadTimeline.create({
         data: {
           leadId: project.leadId,
           type: 'SYSTEM',
-          content: `Motor de Orçamento gerou orçamento v${nextVersion} com preço final R$ ${formattedPrice} ${pricingDesc}.`,
-          author: 'Orçamento AI',
+          content: `Motor de Orcamento gerou orcamento v${nextVersion} com preco final R$ ${formattedPrice} ${pricingDesc}.`,
+          author: 'Motor de Engenharia',
         },
       });
 
@@ -225,10 +230,9 @@ export class BudgetController {
       });
     }
 
-    return {
-      ...budget,
-      sqmItemsDetail
-    };
+    return pricingMethod === 'SQM'
+      ? { ...budget, engineering: this.getProjectEngineering(project), sqmItemsDetail }
+      : { ...budget, engineering };
   }
 
   @Patch(':id')
@@ -253,24 +257,34 @@ export class BudgetController {
     const activePricingMethod = pricingMethod !== undefined ? pricingMethod : budget.pricingMethod;
     const activeSqmValue = sqmValue !== undefined ? sqmValue : budget.sqmValue;
     const activeMarkup = markup !== undefined ? markup : budget.markup;
-    const activeMargin = margin !== undefined ? margin : budget.margin;
     const activeCommission = commission !== undefined ? commission : budget.commission;
     const activeTax = taxPercent !== undefined ? taxPercent : budget.taxPercent;
+    const activeWaste = budget.wastePercent;
 
     let calculatedPrice = finalPrice || budget.finalPrice;
+    let engineering = this.getProjectEngineering(project);
 
-    if (!finalPrice && (margin !== undefined || markup !== undefined || commission !== undefined || taxPercent !== undefined || pricingMethod !== undefined || sqmValue !== undefined)) {
+    if (!finalPrice && (markup !== undefined || commission !== undefined || taxPercent !== undefined || pricingMethod !== undefined || sqmValue !== undefined)) {
       if (activePricingMethod === 'SQM' && project) {
         const details = this.getSqmDetails(project, activeSqmValue);
         const totalArea = details.reduce((sum, item) => sum + item.area, 0);
         const basePrice = totalArea * activeSqmValue;
         const priceRatio = 1 - (activeCommission / 100) - (activeTax / 100);
         calculatedPrice = basePrice / (priceRatio > 0.1 ? priceRatio : 0.5);
-      } else {
-        const sheetsCost = budget.totalMdfSheets * 280.0;
-        const rawCost = sheetsCost + budget.totalHardwareCost + budget.totalLaborCost;
-        const costRatio = 1 - (activeMargin / 100) - (activeCommission / 100) - (activeTax / 100);
-        calculatedPrice = rawCost * activeMarkup / (costRatio > 0.1 ? costRatio : 0.5);
+      } else if (project) {
+        engineering = buildEngineeringResult(project.items, {
+          projectId: project.id,
+          wastePercent: activeWaste,
+          markup: activeMarkup,
+          commissionPercent: activeCommission,
+          taxPercent: activeTax,
+        });
+        calculatedPrice = engineering.summary.salePrice;
+        const previousTwin = project.digitalTwin && typeof project.digitalTwin === 'object' ? project.digitalTwin as any : {};
+        await this.prisma.project.update({
+          where: { id: project.id },
+          data: { digitalTwin: { ...previousTwin, engineering } },
+        });
       }
     }
 
@@ -283,6 +297,9 @@ export class BudgetController {
         markup: markup !== undefined ? markup : undefined,
         commission: commission !== undefined ? commission : undefined,
         taxPercent: taxPercent !== undefined ? taxPercent : undefined,
+        totalMdfSheets: engineering ? engineering.summary.sheets : undefined,
+        totalHardwareCost: engineering ? engineering.components.filter((c: any) => c.type === 'hardware').reduce((s: number, c: any) => s + c.totalCost, 0) : undefined,
+        totalLaborCost: engineering ? engineering.components.filter((c: any) => c.type === 'labor').reduce((s: number, c: any) => s + c.totalCost, 0) : undefined,
         finalPrice: calculatedPrice !== undefined ? Math.round(calculatedPrice * 100) / 100 : undefined,
       },
     });
@@ -290,9 +307,10 @@ export class BudgetController {
     if (updatedBudget.pricingMethod === 'SQM' && project) {
       return {
         ...updatedBudget,
-        sqmItemsDetail: this.getSqmDetails(project, updatedBudget.sqmValue)
+        engineering,
+        sqmItemsDetail: this.getSqmDetails(project, updatedBudget.sqmValue),
       };
     }
-    return updatedBudget;
+    return { ...updatedBudget, engineering };
   }
 }

@@ -6,6 +6,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
 import { buildProjectInterpretation, ProjectSourceFile } from './project-interpretation.engine';
+import { buildEngineeringResult } from './engineering-pricing.engine';
 
 /**
  * Rendering DPI for the executive drawings. High DPI is required so GPT-4o Vision
@@ -1104,6 +1105,43 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
     return { success: true, stats: twin.audit?.stats || null };
   }
 
+  @Post(':id/engineering')
+  async rebuildEngineering(
+    @Headers('authorization') authHeader: string,
+    @Param('id') id: string,
+    @Body() body: any,
+  ) {
+    const tenantId = this.verifyTokenAndGetTenantId(authHeader);
+    const project = await this.prisma.project.findFirst({
+      where: { id, tenantId },
+      include: { items: true },
+    });
+    if (!project) throw new HttpException('Project not found', HttpStatus.NOT_FOUND);
+    if (!project.items.length) throw new HttpException('Projeto sem moveis medidos', HttpStatus.UNPROCESSABLE_ENTITY);
+
+    const engineering = buildEngineeringResult(project.items, {
+      projectId: id,
+      sheetPrice: body?.sheetPrice,
+      edgePricePerMeter: body?.edgePricePerMeter,
+      laborPricePerHour: body?.laborPricePerHour,
+      wastePercent: body?.wastePercent,
+      markup: body?.markup,
+      commissionPercent: body?.commission,
+      taxPercent: body?.taxPercent,
+    });
+    const previousTwin = project.digitalTwin && typeof project.digitalTwin === 'object' ? project.digitalTwin as any : {};
+    await this.prisma.project.update({
+      where: { id },
+      data: {
+        digitalTwin: {
+          ...previousTwin,
+          engineering,
+        },
+      },
+    });
+    return { success: true, engineering };
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   //  PARSE ENDPOINT
   // ─────────────────────────────────────────────────────────────────────────
@@ -1352,6 +1390,10 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
         }
       }
 
+      const engineering = !parseError && items.length > 0
+        ? buildEngineeringResult(items, { projectId: id })
+        : null;
+
       await this.prisma.project.update({
         where: { id },
         data: {
@@ -1359,8 +1401,8 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
           parseProgress: 100,
           parseError,
           digitalTwin: digitalTwin
-            ? { ...digitalTwin, interpretation }
-            : { environments: [], audit: { warnings: [], stats: { environments: 0, furnitures: 0, components: 0 } }, interpretation },
+            ? { ...digitalTwin, interpretation, engineering }
+            : { environments: [], audit: { warnings: [], stats: { environments: 0, furnitures: 0, components: 0 } }, interpretation, engineering },
         },
       });
 
