@@ -5,12 +5,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
+import { buildProjectInterpretation, ProjectSourceFile } from './project-interpretation.engine';
 
 /**
  * Rendering DPI for the executive drawings. High DPI is required so GPT-4o Vision
  * can read the fine red dimension cotas on A3 technical sheets.
  */
-const PAGE_DPI = 200;
+const PAGE_DPI = Math.max(200, Number(process.env.PROJECT_PDF_DPI) || 300);
 /** How many Vision calls run in parallel (one per sheet). Configurable via env; 2 balances Azure TPM vs latency. */
 const VISION_CONCURRENCY = Math.max(1, Number(process.env.VISION_CONCURRENCY) || 2);
 /** Safety cap so a monster PDF never explodes cost/latency. */
@@ -635,7 +636,12 @@ Nota: Se a dimensão não está cotada, use null:
 
     const content = await this.callVision(cfg, messages, 8192);
     console.log(`[AI Reader] Sheet ${pageIndex + 1} raw content snippet:`, content ? (content.length > 500 ? content.substring(0, 500) + '...' : content) : 'NULL');
-    const items = this.extractItemsFromContent(content);
+    const items = this.extractItemsFromContent(content).map((item) => ({
+      ...item,
+      source: structuredContext ? 'ocr_layout' : 'vision',
+      sourcePage: pageIndex + 1,
+      sourceText: structuredContext ? structuredContext.slice(0, 1200) : null,
+    }));
     console.log(`[AI Reader] Sheet ${pageIndex + 1}/${totalPages}: ${items.length} item(s)${structuredContext ? ' (com Doc Intelligence)' : ''}.`);
     return items;
   }
@@ -757,6 +763,9 @@ Nota: Se a dimensão não está cotada, use null:
         observacoes: obs.substring(0, 500) || null,
         area,
         volume,
+        source: raw.source || 'vision',
+        sourcePage: raw.sourcePage || null,
+        sourceText: raw.sourceText ? String(raw.sourceText).substring(0, 1200) : null,
       });
     }
     return out;
@@ -1035,7 +1044,11 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
     }
     const twin = await this.assembleDigitalTwin(cfg, byEnv);
     if (!twin) throw new HttpException('Falha ao montar o Digital Twin', HttpStatus.BAD_GATEWAY);
-    await this.prisma.project.update({ where: { id }, data: { digitalTwin: twin } });
+    const previousTwin = project.digitalTwin && typeof project.digitalTwin === 'object' ? project.digitalTwin as any : null;
+    await this.prisma.project.update({
+      where: { id },
+      data: { digitalTwin: previousTwin?.interpretation ? { ...twin, interpretation: previousTwin.interpretation } : twin },
+    });
     return { success: true, stats: twin.audit?.stats || null };
   }
 
@@ -1100,6 +1113,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
     let isRealParsing = false;
     let parseError: string | null = null;
     const allFilenames: string[] = [];
+    const sourceFiles: ProjectSourceFile[] = [];
 
     try {
       const cfg = this.getVisionConfig();
@@ -1167,6 +1181,12 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
         if (isPdf) {
           pageContexts = await this.analyzeLayout(buffer);
         }
+        sourceFiles.push({
+          filename: fname,
+          mimeType: file.mimeType,
+          pages: pageImages.length,
+          hasStructuredContext: pageContexts.some((ctx) => Boolean(ctx && ctx.length > 20)),
+        });
 
         await this.prisma.project.update({
           where: { id },
@@ -1202,7 +1222,12 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
               content: `Analise este projeto executivo de marcenaria a partir do texto extraído e extraia TODAS as peças de TODOS os ambientes.\n\nTexto:\n${extractedText.substring(0, 14000)}`,
             },
           ];
-          rawItems = this.extractItemsFromContent(await this.callVision(cfg, messages, 8192));
+          rawItems = this.extractItemsFromContent(await this.callVision(cfg, messages, 8192)).map((item) => ({
+            ...item,
+            source: 'ocr_layout',
+            sourcePage: null,
+            sourceText: extractedText.substring(0, 1200),
+          }));
         }
 
         console.log(`[AI Reader] ${fname}: ${rawItems.length} raw item(s) extraídos.`);
@@ -1212,7 +1237,9 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
       // Consolida TODOS os itens de TODOS os arquivos
       const sanitized = this.sanitizeItems(allRawItems);
       const deduplicated = this.dedupeItems(sanitized);
+      const interpretation = buildProjectInterpretation(deduplicated, sourceFiles);
       isRealParsing = deduplicated.length > 0;
+      console.log(`[Interpretation] ${interpretation.summary.furnitureItems} movel(is), ${interpretation.summary.readyToQuote} pronto(s), ${interpretation.summary.pendingMeasurements} pendente(s), status=${interpretation.validation.status}.`);
       console.log(`[AI Reader] Batch consolidado: ${allRawItems.length} raw → ${sanitized.length} sanitized → ${deduplicated.length} deduplicated item(s).`);
 
       // Persist the extracted pieces.
@@ -1280,7 +1307,9 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
           parseStatus: parseError ? 'FAILED' : 'COMPLETED',
           parseProgress: 100,
           parseError,
-          digitalTwin: digitalTwin ?? undefined,
+          digitalTwin: digitalTwin
+            ? { ...digitalTwin, interpretation }
+            : { environments: [], audit: { warnings: [], stats: { environments: 0, furnitures: 0, components: 0 } }, interpretation },
         },
       });
 

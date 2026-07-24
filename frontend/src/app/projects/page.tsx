@@ -310,6 +310,7 @@ export default function Projects() {
   const canvasNestingRef = useRef<HTMLCanvasElement>(null);
 
   const selectedItems = selectedProj?.items || [];
+  const interpretation = selectedProj?.digitalTwin?.interpretation;
   
   const environments = useMemo(() => {
     const names = selectedItems.map((item: any) => item.environment);
@@ -1830,9 +1831,9 @@ export default function Projects() {
       </section>
 
       {/* Main Grid */}
-      <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+      <section className="grid grid-cols-1 gap-6 lg:grid-cols-12">
         {/* Left projects list */}
-        <aside className="min-w-0 space-y-3">
+        <aside className="space-y-3 lg:col-span-4 xl:col-span-4">
           {projects.map((project) => {
             const active = selectedProj?.id === project.id;
             return (
@@ -1853,7 +1854,7 @@ export default function Projects() {
                     {project.items.length} itens
                   </span>
                 </div>
-                <h3 className="truncate font-semibold tracking-tight text-[#fff8f0]">
+                <h3 className="font-semibold tracking-tight text-[#fff8f0]">
                   {project.name}
                 </h3>
                 <p className="mt-2 line-clamp-2 text-sm leading-5 text-[#bba890]">
@@ -1865,9 +1866,9 @@ export default function Projects() {
         </aside>
 
         {/* Right selected project details */}
-        <main className="min-h-[520px] min-w-0 rounded-2xl border border-[#e8d4b8]/12 bg-[#211811]/70 p-5 md:p-7">
+        <main className="min-h-[520px] rounded-2xl border border-[#e8d4b8]/12 bg-[#211811]/70 p-5 md:p-7 lg:col-span-8 xl:col-span-8">
           {selectedProj ? (
-            <div className="min-w-0 space-y-7">
+            <div className="space-y-7">
               {/* Selected Project Header */}
               <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-start">
                 <div>
@@ -1876,7 +1877,7 @@ export default function Projects() {
                       {statusLabel[selectedProj.status] || selectedProj.status}
                     </span>
                     {selectedProj.originalFileUrl && (
-                      <span className="max-w-full break-all rounded-full border border-[#e8d4b8]/12 px-3 py-1 text-xs text-[#bba890]">
+                      <span className="rounded-full border border-[#e8d4b8]/12 px-3 py-1 text-xs text-[#bba890]">
                         {selectedProj.originalFileUrl}
                       </span>
                     )}
@@ -1908,10 +1909,10 @@ export default function Projects() {
               </div>
 
               {/* Navigation Tabs */}
-              <div className="flex min-w-0 overflow-x-auto border-b border-[#e8d4b8]/10">
+              <div className="flex border-b border-[#e8d4b8]/10">
                 <button
                   onClick={() => setActiveTab("details")}
-                  className={`shrink-0 border-b-2 px-5 py-3 text-sm font-bold transition ${
+                  className={`border-b-2 px-5 py-3 text-sm font-bold transition ${
                     activeTab === "details"
                       ? "border-[#d6ad79] text-[#fff8f0]"
                       : "border-transparent text-[#cdbca7] hover:text-[#fff8f0]"
@@ -1921,7 +1922,7 @@ export default function Projects() {
                 </button>
                 <button
                   onClick={() => setActiveTab("model3d")}
-                  className={`shrink-0 border-b-2 px-5 py-3 text-sm font-bold transition ${
+                  className={`border-b-2 px-5 py-3 text-sm font-bold transition ${
                     activeTab === "model3d"
                       ? "border-[#d6ad79] text-[#fff8f0]"
                       : "border-transparent text-[#cdbca7] hover:text-[#fff8f0]"
@@ -1931,7 +1932,7 @@ export default function Projects() {
                 </button>
                 <button
                   onClick={() => setActiveTab("budgeting")}
-                  className={`shrink-0 border-b-2 px-5 py-3 text-sm font-bold transition ${
+                  className={`border-b-2 px-5 py-3 text-sm font-bold transition ${
                     activeTab === "budgeting"
                       ? "border-[#d6ad79] text-[#fff8f0]"
                       : "border-transparent text-[#cdbca7] hover:text-[#fff8f0]"
@@ -1964,10 +1965,55 @@ export default function Projects() {
                     </div>
                   )}
 
-                  <div className="grid min-w-0 grid-cols-1 gap-5 2xl:grid-cols-[minmax(0,1fr)_300px]">
+                  {interpretation && (
+                    <div className="rounded-xl border border-[#d6ad79]/18 bg-[#211811]/70 p-4">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#d6ad79]">
+                            Motor tecnico de interpretacao
+                          </p>
+                          <h3 className="mt-1 text-base font-semibold text-[#fff8f0]">
+                            {interpretation.validation?.status === "READY_TO_QUOTE"
+                              ? "Interpretacao pronta para orcamento"
+                              : interpretation.validation?.status === "BLOCKED"
+                                ? "Interpretacao bloqueada para revisao"
+                                : "Interpretacao precisa de revisao"}
+                          </h3>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-center sm:min-w-[360px]">
+                          <div className="rounded-lg border border-[#e8d4b8]/12 bg-[#100b08]/55 px-3 py-2">
+                            <p className="text-lg font-black text-[#fff8f0]">{interpretation.summary?.readyToQuote || 0}</p>
+                            <p className="text-[10px] uppercase tracking-[0.12em] text-[#a99680]">prontos</p>
+                          </div>
+                          <div className="rounded-lg border border-[#e8d4b8]/12 bg-[#100b08]/55 px-3 py-2">
+                            <p className="text-lg font-black text-[#fff8f0]">{interpretation.summary?.pendingMeasurements || 0}</p>
+                            <p className="text-[10px] uppercase tracking-[0.12em] text-[#a99680]">pendentes</p>
+                          </div>
+                          <div className="rounded-lg border border-[#e8d4b8]/12 bg-[#100b08]/55 px-3 py-2">
+                            <p className="text-lg font-black text-[#fff8f0]">{interpretation.summary?.warnings || 0}</p>
+                            <p className="text-[10px] uppercase tracking-[0.12em] text-[#a99680]">alertas</p>
+                          </div>
+                        </div>
+                      </div>
+                      {interpretation.validation?.requiredQuestions?.length > 0 && (
+                        <div className="mt-3 border-t border-[#e8d4b8]/10 pt-3">
+                          <p className="mb-2 text-xs font-semibold text-[#ead5ba]">Pendencias para fechar com seguranca:</p>
+                          <div className="flex flex-wrap gap-2">
+                            {interpretation.validation.requiredQuestions.slice(0, 4).map((q: string) => (
+                              <span key={q} className="rounded-full border border-[#e8d4b8]/14 bg-[#100b08]/50 px-3 py-1 text-xs text-[#cdbca7]">
+                                {q}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_300px]">
                     {/* Left: Ambientes e Medidas agrupados */}
-                    <div className="min-w-0">
-                      <div className="mb-4 flex flex-col gap-3 border-b border-[#e8d4b8]/10 pb-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-[#e8d4b8]/10 pb-3">
                         <div>
                           <h3 className="text-lg font-semibold tracking-tight text-[#fff8f0]">
                             Ambientes e medidas
@@ -1980,7 +2026,7 @@ export default function Projects() {
                         </div>
 
                         {/* Toggle Mode Button */}
-                        <div className="flex max-w-full flex-wrap items-center gap-1 rounded-xl border border-[#e8d4b8]/15 bg-[#18120d] p-1">
+                        <div className="flex items-center gap-1 bg-[#18120d] p-1 rounded-xl border border-[#e8d4b8]/15 shrink-0">
                           <button
                             onClick={() => setViewMode('raw')}
                             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
@@ -2045,7 +2091,7 @@ export default function Projects() {
                     </div>
 
                     {/* Right: Materiais + Fluxo */}
-                    <aside className="min-w-0 space-y-5">
+                    <aside className="space-y-5">
                       {selectedItems.length > 0 && (
                         <div className="rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] p-5">
                           <h3 className="mb-3 font-semibold tracking-tight text-[#fff8f0]">Materiais</h3>
@@ -2116,7 +2162,7 @@ export default function Projects() {
               {activeTab === "model3d" && (selectedProj?.digitalTwin ? (
                 <ThreeViewer project={selectedProj} />
               ) : (
-                <div className="grid min-w-0 grid-cols-1 gap-5 2xl:grid-cols-[minmax(0,1fr)_320px]">
+                <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_320px]">
                   {/* Visualizer Canvas */}
                   <div className="relative rounded-2xl border border-[#e8d4b8]/10 bg-[#0b0907] p-1 flex flex-col justify-between">
                     {faces3D.length ? (
@@ -2352,7 +2398,7 @@ export default function Projects() {
               {activeTab === "budgeting" && (
                 <div className="space-y-6">
                   {/* Calculations setup */}
-                  <section className="grid min-w-0 grid-cols-1 gap-5 2xl:grid-cols-[minmax(0,1fr)_380px]">
+                  <section className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_380px]">
                     {/* Left: Interactive nesting canvas */}
                     <div className="rounded-2xl border border-[#e8d4b8]/10 bg-[#0b0907] p-5 space-y-4">
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-[#e8d4b8]/10">
