@@ -5,12 +5,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
+import { buildProjectInterpretation, ProjectSourceFile } from './project-interpretation.engine';
+import { buildEngineeringResult } from './engineering-pricing.engine';
 
 /**
  * Rendering DPI for the executive drawings. High DPI is required so GPT-4o Vision
  * can read the fine red dimension cotas on A3 technical sheets.
  */
-const PAGE_DPI = 200;
+const PAGE_DPI = Math.max(200, Number(process.env.PROJECT_PDF_DPI) || 300);
 /** How many Vision calls run in parallel (one per sheet). Configurable via env; 2 balances Azure TPM vs latency. */
 const VISION_CONCURRENCY = Math.max(1, Number(process.env.VISION_CONCURRENCY) || 2);
 /** Safety cap so a monster PDF never explodes cost/latency. */
@@ -22,6 +24,19 @@ interface VisionConfig {
   model?: string;
   name?: string;
 }
+
+type UploadedProjectFile = {
+  filename: string;
+  fileBase64: string;
+  mimeType: string;
+};
+
+type StoredProjectDocument = {
+  filename: string;
+  mimeType: string;
+  storageKey: string;
+  pages?: number;
+};
 
 @Controller('projects')
 export class ProjectController {
@@ -348,6 +363,87 @@ Nota: Se a dimensão não está cotada, use null:
   "confianca": 30`;
   }
 
+  /**
+   * The initial pass identifies the whole project. A review pass is deliberately
+   * narrower: it may only complete the items the validation layer flagged and
+   * must leave unrelated furniture untouched.
+   */
+  private buildTargetedReviewPrompt(targets: any[]): string {
+    const targetList = targets.map((target, index) => {
+      const dimensions = target.dimensions || {};
+      const brief = target.reviewBrief || {};
+      const confirmed = brief.confirmedDimensions?.length
+        ? brief.confirmedDimensions.join(', ')
+        : [dimensions.width && `L=${dimensions.width} mm`, dimensions.height && `A=${dimensions.height} mm`, dimensions.depth && `P=${dimensions.depth} mm`].filter(Boolean).join(', ') || 'nenhuma';
+      const missing = brief.missingDimensions?.join(', ') || [
+        !dimensions.width && 'largura (L)',
+        !dimensions.height && 'altura (A)',
+        !dimensions.depth && 'profundidade (P)',
+      ].filter(Boolean).join(', ') || 'validar medidas';
+      const objectives = brief.objectives?.join(' ') || target.validation?.issues?.map((issue: any) => issue.message).join(' ') || 'Conferir medidas e material.';
+      const evidence = String(brief.evidenceSummary || target.evidence?.notes || target.evidence?.sourceText || '').replace(/\s+/g, ' ').slice(0, 420);
+      return `${index + 1}. Ambiente: ${target.environment || 'Ambiente'}\n   Movel: ${target.description || target.itemType || 'Movel'} | codigo: ${target.codigo || 'sem codigo'}\n   Ja confirmado: ${confirmed}\n   Falta validar: ${missing}\n   Objetivo: ${objectives}\n   Folha de origem: ${brief.sourcePage || target.evidence?.sourcePage || 'nao identificada'}\n   Evidencia anterior: ${evidence || 'nenhuma - localizar diretamente na prancha'}`;
+    }).join('\n');
+
+    return `${this.buildSystemPrompt()}\n\nMODO REVISAO DIRIGIDA DO PDF\nVoce esta revisando APENAS os moveis abaixo, pois ficaram pendentes ou com alerta na primeira leitura. Leia com maximo cuidado as cotas, setas, vistas e texto OCR relacionados a eles.\n\nITENS-ALVO:\n${targetList}\n\nREGRAS ADICIONAIS:\n- Retorne SOMENTE itens que correspondam claramente a um dos itens-alvo; nao crie novos moveis.\n- Para cada dimensao, use somente uma cota explicitamente visivel/escrita no PDF. Converta cm para mm quando aplicavel.\n- Se uma medida nao puder ser associada sem ambiguidade ao movel, mantenha null e explique em observacoes.\n- Em observacoes, registre a origem da cota de forma curta, por exemplo: \"Evidencia: L 1274 mm na vista frontal, A 600 mm, P 350 mm no corte\". Quando houver pendencia, diga exatamente qual vista/cota nao foi localizada.\n- Leia as vistas frontal, lateral, corte e planta como fontes complementares do MESMO movel. Pode completar L, A e P usando vistas diferentes, desde que codigo, posicao ou desenho confirmem que pertencem ao mesmo modulo.\n- Use medidas parciais ja confirmadas como ancora. Nao substitua uma medida confirmada por outra sem explicar a divergencia em observacoes.\n- Nao estime medidas por proporcao, padrao de marcenaria, eletrodomestico ou render.\n- Preserve o ambiente, codigo e descricao quando estiverem identificaveis.`;
+  }
+
+  private projectUploadDirectory(projectId: string): string {
+    const root = process.env.PROJECT_UPLOAD_DIR || path.join(process.cwd(), 'uploads', 'projects');
+    const safeProjectId = String(projectId).replace(/[^a-zA-Z0-9_-]/g, '');
+    return path.join(root, safeProjectId);
+  }
+
+  /** Keeps the original drawing available for a later targeted review. */
+  private persistProjectDocuments(projectId: string, files: UploadedProjectFile[]): StoredProjectDocument[] {
+    const directory = this.projectUploadDirectory(projectId);
+    fs.mkdirSync(directory, { recursive: true });
+
+    return files.map((file, index) => {
+      const originalName = file.filename || `documento-${index + 1}`;
+      const extension = path.extname(originalName).replace(/[^.a-zA-Z0-9]/g, '') ||
+        (file.mimeType === 'application/pdf' ? '.pdf' : '.jpg');
+      const safeBase = path.basename(originalName, path.extname(originalName))
+        .replace(/[^a-zA-Z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80) || `documento-${index + 1}`;
+      const storageKey = `${String(index + 1).padStart(2, '0')}-${safeBase}${extension}`;
+      fs.writeFileSync(path.join(directory, storageKey), Buffer.from(file.fileBase64, 'base64'));
+      return { filename: originalName, mimeType: file.mimeType, storageKey };
+    });
+  }
+
+  private sourceItemFromInterpretation(item: any): any {
+    return {
+      environment: item.environment,
+      itemType: item.itemType,
+      description: item.description,
+      codigo: item.codigo,
+      width: item.dimensions?.width,
+      height: item.dimensions?.height,
+      depth: item.dimensions?.depth,
+      thickness: item.dimensions?.thickness || 18,
+      quantity: item.quantity || 1,
+      materialType: item.materialType,
+      cor: item.color,
+      acabamento: item.finish,
+      observacoes: item.evidence?.notes,
+      source: item.evidence?.source,
+      sourcePage: item.evidence?.sourcePage,
+      sourceText: item.evidence?.sourceText,
+    };
+  }
+
+  private isSameFurniture(left: any, right: any): boolean {
+    const leftCode = this.normKey(String(left.codigo || ''));
+    const rightCode = this.normKey(String(right.codigo || ''));
+    if (leftCode && rightCode && leftCode === rightCode && this.normKey(left.environment) === this.normKey(right.environment)) return true;
+    const sameEnvironment = this.normKey(left.environment) === this.normKey(right.environment);
+    const leftText = this.normKey(`${left.description || ''} ${left.itemType || ''}`);
+    const rightText = this.normKey(`${right.description || ''} ${right.itemType || ''}`);
+    return sameEnvironment && Boolean(leftText && rightText) && (leftText.includes(rightText) || rightText.includes(leftText));
+  }
+
   private async callVision(
     cfg: VisionConfig,
     messages: any[],
@@ -457,87 +553,126 @@ Nota: Se a dimensão não está cotada, use null:
   /** Parse the model's JSON content into an items array, tolerating various shapes. */
   private extractItemsFromContent(content: string | null): any[] {
     if (!content) return [];
-    try {
-      let clean = content.trim();
+    const normalizeJsonText = (value: string): string => {
+      let clean = value.trim();
       if (clean.startsWith('```json')) clean = clean.slice(7);
       if (clean.startsWith('```')) clean = clean.slice(3);
       if (clean.endsWith('```')) clean = clean.slice(0, -3);
-      clean = clean.trim();
+      return clean.trim();
+    };
 
-      let parsed: any = JSON.parse(clean);
+    const unwrapItems = (parsed: any): any[] => {
       if (parsed && !Array.isArray(parsed)) {
-        if (Array.isArray(parsed.items)) parsed = parsed.items;
-        else if (Array.isArray(parsed.pecas)) parsed = parsed.pecas;
-        else {
-          for (const key of Object.keys(parsed)) {
-            if (Array.isArray(parsed[key])) { parsed = parsed[key]; break; }
-          }
+        if (Array.isArray(parsed.items)) return parsed.items;
+        if (Array.isArray(parsed.pecas)) return parsed.pecas;
+        for (const key of Object.keys(parsed)) {
+          if (Array.isArray(parsed[key])) return parsed[key];
         }
       }
       return Array.isArray(parsed) ? parsed : [];
+    };
+
+    const salvageCompleteObjects = (clean: string): any[] => {
+      const start = clean.indexOf('[');
+      if (start < 0) return [];
+      const out: any[] = [];
+      let depth = 0;
+      let inString = false;
+      let escaped = false;
+      let objectStart = -1;
+
+      for (let i = start; i < clean.length; i++) {
+        const ch = clean[i];
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (ch === '\\') escaped = true;
+          else if (ch === '"') inString = false;
+          continue;
+        }
+        if (ch === '"') {
+          inString = true;
+          continue;
+        }
+        if (ch === '{') {
+          if (depth === 0) objectStart = i;
+          depth++;
+        } else if (ch === '}') {
+          depth--;
+          if (depth === 0 && objectStart >= 0) {
+            const rawObject = clean.slice(objectStart, i + 1).replace(/,\s*([}\]])/g, '$1');
+            try {
+              out.push(JSON.parse(rawObject));
+            } catch {
+              // Ignore only this object; later complete objects may still be valid.
+            }
+            objectStart = -1;
+          }
+        }
+      }
+      return out;
+    };
+
+    try {
+      const clean = normalizeJsonText(content);
+      return unwrapItems(JSON.parse(clean));
     } catch (err) {
+      const clean = normalizeJsonText(content);
+      const salvaged = salvageCompleteObjects(clean);
+      if (salvaged.length > 0) {
+        console.warn(`[AI Reader] JSON parse failed, salvaged ${salvaged.length} complete item(s) from partial response.`);
+        return salvaged;
+      }
       console.error('[AI Reader] JSON parse failed:', err, '| raw:', content.substring(0, 200));
       return [];
     }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  //  CAMADA 1 — AZURE AI DOCUMENT INTELLIGENCE (layout/OCR + cotas + tabelas)
+  //  CAMADA 1 — LOCAL PADDLEOCR MICROSERVICE (OCR + PyMuPDF)
   // ─────────────────────────────────────────────────────────────────────────
 
-  /** Resolve a config do Azure Document Intelligence, ou null se não configurado. */
-  private getDocIntelConfig(): { endpoint: string; key: string } | null {
-    const key = process.env.AZURE_AI_DOC_INTEL_KEY;
-    const endpoint = process.env.AZURE_AI_DOC_INTEL_ENDPOINT;
-    if (!key || !endpoint) return null;
-    return { endpoint: endpoint.replace(/\/$/, ''), key };
+  /** Verifica se o OCR local está habilitado. */
+  private getLocalOcrUrl(): string | null {
+    return process.env.LOCAL_OCR_ENDPOINT || 'http://localhost:8000/analyze';
   }
 
   /**
-   * Envia o PDF ao modelo prebuilt-layout do Azure Document Intelligence e retorna,
-   * por página (índice 0-based), um contexto estruturado (texto OCR + tabelas em
-   * markdown + cotas numéricas com posição). Retorna [] se não configurado ou em
-   * caso de falha — o pipeline então segue só com a imagem (fallback silencioso).
+   * Envia PDF/imagem ao microserviço local PaddleOCR e retorna,
+   * por página (índice 0-based), um contexto estruturado (texto OCR +
+   * cotas numéricas com posição). Retorna [] se o serviço estiver offline
+   * em caso de falha — o pipeline então segue só com a imagem (fallback silencioso).
    */
-  private async analyzeLayout(pdfBuffer: Buffer): Promise<string[]> {
-    const di = this.getDocIntelConfig();
-    if (!di) return [];
-
-    const apiVersion = process.env.AZURE_AI_DOC_INTEL_API_VERSION || '2024-11-30';
-    const isNewApi = apiVersion >= '2024-11-30';
-    const analyzePath = isNewApi
-      ? `/documentintelligence/documentModels/prebuilt-layout:analyze?api-version=${apiVersion}`
-      : `/formrecognizer/documentModels/prebuilt-layout:analyze?api-version=${apiVersion}`;
+  private async analyzeLayout(fileBuffer: Buffer, contentType: string = 'application/pdf'): Promise<string[]> {
+    const ocrUrl = this.getLocalOcrUrl();
+    if (!ocrUrl) return [];
 
     try {
-      const submit = await fetch(`${di.endpoint}${analyzePath}`, {
+      const formData = new FormData();
+      const blob = new Blob([fileBuffer], { type: contentType });
+      formData.append('file', blob, 'document.pdf');
+
+      const submit = await fetch(ocrUrl, {
         method: 'POST',
-        headers: { 'Ocp-Apim-Subscription-Key': di.key, 'Content-Type': 'application/pdf' },
-        body: pdfBuffer as any,
+        body: formData,
       });
-      if (submit.status !== 202) {
-        console.warn('[Doc Intelligence] submit falhou:', submit.status, (await submit.text()).slice(0, 200));
+
+      if (!submit.ok) {
+        console.warn('[PaddleOCR] submit falhou:', submit.status, (await submit.text()).slice(0, 200));
         return [];
       }
-      const opLocation = submit.headers.get('operation-location') || submit.headers.get('Operation-Location');
-      if (!opLocation) return [];
 
-      // Polling da operação assíncrona (até ~60s)
-      let analyzeResult: any = null;
-      for (let attempt = 0; attempt < 30; attempt++) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const poll = await fetch(opLocation, { headers: { 'Ocp-Apim-Subscription-Key': di.key } });
-        const data = await poll.json();
-        if (data.status === 'succeeded') { analyzeResult = data.analyzeResult; break; }
-        if (data.status === 'failed') { console.warn('[Doc Intelligence] análise falhou.'); return []; }
+      const data = await submit.json();
+      if (data.status !== 'completed') {
+        console.warn('[PaddleOCR] análise falhou.', data.status);
+        return [];
       }
-      if (!analyzeResult) { console.warn('[Doc Intelligence] timeout no polling.'); return []; }
 
-      const contexts = this.buildPageContexts(analyzeResult);
-      console.log(`[Doc Intelligence] contexto estruturado de ${contexts.length} página(s).`);
+      // O backend Python já devolve `contexts` populado corretamente
+      const contexts = data.contexts || [];
+      console.log(`[PaddleOCR] contexto estruturado de ${contexts.length} página(s).`);
       return contexts;
     } catch (err) {
-      console.warn('[Doc Intelligence] erro:', err);
+      console.warn('[PaddleOCR] erro de conexão com o microserviço local (verifique se está rodando):', err);
       return [];
     }
   }
@@ -609,7 +744,7 @@ Nota: Se a dimensão não está cotada, use null:
     const userContent: any[] = [
       {
         type: 'text',
-        text: `Esta e a folha ${pageIndex + 1} de ${totalPages} de um projeto de marcenaria sob medida. Analise SOMENTE esta folha e extraia apenas MOVEIS PLANEJADOS (modulos principais/moveis montados). Use medidas reais explicitas em milimetros quando houver cota. Nao extraia subpecas, eletrodomesticos, loucas, metais, decoracao ou itens de obra. Se for foto/render sem cotas, retorne os moveis planejados visiveis com dimensoes null e observacao de pendencia, sem inventar medidas.`,
+        text: `Esta e a folha ${pageIndex + 1} de ${totalPages} de um projeto de marcenaria sob medida. Analise SOMENTE esta folha e extraia apenas MOVEIS PLANEJADOS (modulos principais/moveis montados). Use medidas reais explicitas em milimetros quando houver cota. Nao extraia subpecas, eletrodomesticos, loucas, metais, decoracao ou itens de obra. Se for foto/render sem cotas, retorne os moveis planejados visiveis com dimensoes null e observacao de pendencia, sem inventar medidas. Priorize no maximo 12 moveis montados por folha para evitar JSON truncado. Nao use medidas assumidas, estimadas ou aproximadas.`,
       },
       {
         type: 'image_url',
@@ -624,7 +759,9 @@ Nota: Se a dimensão não está cotada, use null:
           `\n\nDADOS ESTRUTURADOS DESTA FOLHA (extraídos por OCR/layout do Azure Document Intelligence). ` +
           `Use estes VALORES como fonte da verdade para as cotas exatas e cruze-os com a imagem para associar cada cota ao movel correto ` +
           `(pela proximidade das posições x,y). Ainda assim aplique a regra cm→mm (×10). ` +
-          `Se uma medida nao tiver cota correspondente, use null ou omita o item; nunca registre medida estimada.\n\n${structuredContext}`,
+          `Se uma medida nao tiver cota correspondente, use null ou omita o item; nunca registre medida estimada. ` +
+          `Para evitar JSON longo/truncado, priorize no maximo 12 MOVEIS MONTADOS desta folha e ignore subpecas. ` +
+          `Nao use as palavras "assumida", "estimada" ou "aproximada": cada width/height/depth precisa vir de cota visivel ou texto OCR.\n\n${structuredContext}`,
       });
     }
 
@@ -633,10 +770,54 @@ Nota: Se a dimensão não está cotada, use null:
       { role: 'user', content: userContent },
     ];
 
-    const content = await this.callVision(cfg, messages, 8192);
+    const content = await this.callVision(cfg, messages, 12000);
     console.log(`[AI Reader] Sheet ${pageIndex + 1} raw content snippet:`, content ? (content.length > 500 ? content.substring(0, 500) + '...' : content) : 'NULL');
-    const items = this.extractItemsFromContent(content);
+    const items = this.extractItemsFromContent(content).map((item) => ({
+      ...item,
+      source: structuredContext ? 'ocr_layout' : 'vision',
+      sourcePage: pageIndex + 1,
+      sourceText: structuredContext ? structuredContext.slice(0, 1200) : null,
+    }));
     console.log(`[AI Reader] Sheet ${pageIndex + 1}/${totalPages}: ${items.length} item(s)${structuredContext ? ' (com Doc Intelligence)' : ''}.`);
+    return items;
+  }
+
+  private async analyzeTargetedReviewPage(
+    cfg: VisionConfig,
+    imageBase64: string,
+    pageIndex: number,
+    totalPages: number,
+    targets: any[],
+    structuredContext?: string,
+  ): Promise<any[]> {
+    const userContent: any[] = [
+      {
+        type: 'text',
+        text: `Esta e a folha ${pageIndex + 1} de ${totalPages}. Faca uma REVISAO DIRIGIDA: procure somente os itens-alvo informados no prompt, conferindo cuidadosamente cada cota e sua associacao ao movel.`,
+      },
+      {
+        type: 'image_url',
+        image_url: { url: `data:image/jpeg;base64,${imageBase64}`, detail: 'high' },
+      },
+    ];
+    if (structuredContext && structuredContext.length > 20) {
+      userContent.push({
+        type: 'text',
+        text: `OCR/layout desta folha. Use para confirmar valores e posicoes das cotas; nao transforme valores sem associacao clara em medida do movel.\n\n${structuredContext}`,
+      });
+    }
+
+    const content = await this.callVision(cfg, [
+      { role: 'system', content: this.buildTargetedReviewPrompt(targets) },
+      { role: 'user', content: userContent },
+    ], 16000);
+    const items = this.extractItemsFromContent(content).map((item) => ({
+      ...item,
+      source: structuredContext ? 'ocr_layout' : 'vision',
+      sourcePage: pageIndex + 1,
+      sourceText: structuredContext ? structuredContext.slice(0, 1200) : null,
+    }));
+    console.log(`[PDF Review] Sheet ${pageIndex + 1}/${totalPages}: ${items.length} targeted item(s).`);
     return items;
   }
 
@@ -757,6 +938,9 @@ Nota: Se a dimensão não está cotada, use null:
         observacoes: obs.substring(0, 500) || null,
         area,
         volume,
+        source: raw.source || 'vision',
+        sourcePage: raw.sourcePage || null,
+        sourceText: raw.sourceText ? String(raw.sourceText).substring(0, 1200) : null,
       });
     }
     return out;
@@ -1035,13 +1219,227 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
     }
     const twin = await this.assembleDigitalTwin(cfg, byEnv);
     if (!twin) throw new HttpException('Falha ao montar o Digital Twin', HttpStatus.BAD_GATEWAY);
-    await this.prisma.project.update({ where: { id }, data: { digitalTwin: twin } });
+    const previousTwin = project.digitalTwin && typeof project.digitalTwin === 'object' ? project.digitalTwin as any : null;
+    await this.prisma.project.update({
+      where: { id },
+      data: { digitalTwin: previousTwin?.interpretation ? { ...twin, interpretation: previousTwin.interpretation } : twin },
+    });
     return { success: true, stats: twin.audit?.stats || null };
+  }
+
+  @Post(':id/engineering')
+  async rebuildEngineering(
+    @Headers('authorization') authHeader: string,
+    @Param('id') id: string,
+    @Body() body: any,
+  ) {
+    const tenantId = this.verifyTokenAndGetTenantId(authHeader);
+    const project = await this.prisma.project.findFirst({
+      where: { id, tenantId },
+      include: { items: true },
+    });
+    if (!project) throw new HttpException('Project not found', HttpStatus.NOT_FOUND);
+    if (!project.items.length) throw new HttpException('Projeto sem moveis medidos', HttpStatus.UNPROCESSABLE_ENTITY);
+
+    const engineering = buildEngineeringResult(project.items, {
+      projectId: id,
+      sheetPrice: body?.sheetPrice,
+      edgePricePerMeter: body?.edgePricePerMeter,
+      laborPricePerHour: body?.laborPricePerHour,
+      wastePercent: body?.wastePercent,
+      markup: body?.markup,
+      commissionPercent: body?.commission,
+      taxPercent: body?.taxPercent,
+    });
+    const previousTwin = project.digitalTwin && typeof project.digitalTwin === 'object' ? project.digitalTwin as any : {};
+    await this.prisma.project.update({
+      where: { id },
+      data: {
+        digitalTwin: {
+          ...previousTwin,
+          engineering,
+        },
+      },
+    });
+    return { success: true, engineering };
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   //  PARSE ENDPOINT
   // ─────────────────────────────────────────────────────────────────────────
+
+  @Post(':id/review-pdf')
+  async reviewProjectPdf(
+    @Headers('authorization') authHeader: string,
+    @Param('id') id: string,
+  ) {
+    const tenantId = this.verifyTokenAndGetTenantId(authHeader);
+    const project = await this.prisma.project.findFirst({
+      where: { id, tenantId },
+      include: { items: true },
+    });
+    if (!project) throw new HttpException('Project not found', HttpStatus.NOT_FOUND);
+
+    const twin = project.digitalTwin && typeof project.digitalTwin === 'object' ? project.digitalTwin as any : {};
+    const interpretation = twin.interpretation;
+    if (!interpretation?.environments) {
+      throw new HttpException('O projeto ainda nao possui uma leitura para revisar.', HttpStatus.UNPROCESSABLE_ENTITY);
+    }
+
+    const targets = interpretation.environments
+      .flatMap((environment: any) => environment.items || [])
+      .filter((item: any) => item.quoteStatus !== 'READY' || (item.validation?.issues || []).some((issue: any) => issue.severity === 'WARNING'));
+    if (!targets.length) {
+      return { success: true, started: false, message: 'Nao ha pendencias ou alertas para revisar.' };
+    }
+
+    const documents = Array.isArray(twin.sourceDocuments) ? twin.sourceDocuments as StoredProjectDocument[] : [];
+    if (!documents.length) {
+      throw new HttpException('Os arquivos deste projeto nao foram guardados para releitura. Reenvie o PDF uma vez para habilitar a revisao dirigida.', HttpStatus.CONFLICT);
+    }
+
+    await this.prisma.project.update({
+      where: { id },
+      data: { parseStatus: 'REVIEWING', parseProgress: 8, parseError: null },
+    });
+    this.runTargetedPdfReview(id, project, documents, targets).catch((error) =>
+      console.error('[PDF Review] unhandled job error:', error),
+    );
+    return { success: true, started: true, targets: targets.length, parseStatus: 'REVIEWING' };
+  }
+
+  private async runTargetedPdfReview(
+    id: string,
+    project: any,
+    documents: StoredProjectDocument[],
+    targets: any[],
+  ): Promise<void> {
+    try {
+      const cfg = this.getVisionConfig();
+      if (!cfg) throw new Error('Motor de IA (OpenAI/Azure) nao configurado no servidor.');
+
+      const reviewItems: any[] = [];
+      const targetPages = new Set<number>(targets
+        .map((item) => Number(item.evidence?.sourcePage))
+        .filter((page) => Number.isInteger(page) && page > 0));
+      const sourceFiles: ProjectSourceFile[] = [];
+      const directory = this.projectUploadDirectory(id);
+
+      for (let documentIndex = 0; documentIndex < documents.length; documentIndex++) {
+        const document = documents[documentIndex];
+        const safeKey = path.basename(String(document.storageKey || ''));
+        const documentPath = path.join(directory, safeKey);
+        if (!safeKey || !fs.existsSync(documentPath)) {
+          console.warn(`[PDF Review] Stored document missing: ${document.filename}`);
+          continue;
+        }
+
+        const buffer = fs.readFileSync(documentPath);
+        const isPdf = document.mimeType === 'application/pdf' || document.filename.toLowerCase().endsWith('.pdf');
+        const pageImages = isPdf
+          ? this.convertPdfToImages(buffer, Math.max(PAGE_DPI, 450)).slice(0, MAX_PAGES)
+          : [buffer.toString('base64')];
+        const contexts = await this.analyzeLayout(buffer, isPdf ? 'application/pdf' : document.mimeType);
+        sourceFiles.push({
+          filename: document.filename,
+          mimeType: document.mimeType,
+          pages: pageImages.length,
+          hasStructuredContext: contexts.some((context) => Boolean(context && context.length > 20)),
+        });
+
+        const candidatePages = targetPages.size
+          ? pageImages.map((_, index) => index).filter((index) => targetPages.has(index + 1))
+          : pageImages.map((_, index) => index);
+        const pagesToReview = candidatePages.length ? candidatePages : pageImages.map((_, index) => index);
+        const fromDocument = await this.runPool(pagesToReview, 1, async (pageIndex) =>
+          this.analyzeTargetedReviewPage(cfg, pageImages[pageIndex], pageIndex, pageImages.length, targets, contexts[pageIndex]),
+        );
+        reviewItems.push(...fromDocument.flat());
+        await this.prisma.project.update({
+          where: { id },
+          data: { parseProgress: Math.min(75, 20 + Math.round(((documentIndex + 1) / documents.length) * 55)) },
+        });
+      }
+
+      const reviewed = this.dedupeItems(this.sanitizeItems(reviewItems))
+        .filter((item) => targets.some((target) => this.isSameFurniture(target, item)));
+      const resolvedTargetIds: string[] = [];
+      const retainedTargets = targets.map((target) => {
+        const reviewedMatch = reviewed.find((item) => this.isSameFurniture(target, item));
+        if (!reviewedMatch) return this.sourceItemFromInterpretation(target);
+        const original = this.sourceItemFromInterpretation(target);
+        const merged = {
+          ...original,
+          ...reviewedMatch,
+          width: reviewedMatch.width || original.width || 0,
+          height: reviewedMatch.height || original.height || 0,
+          depth: reviewedMatch.depth || original.depth || 0,
+          observacoes: `${reviewedMatch.observacoes || original.observacoes || ''} | Revisao dirigida do PDF.`.trim(),
+        };
+        if (merged.width > 0 && merged.height > 0 && merged.depth > 0) resolvedTargetIds.push(target.id);
+        return merged;
+      });
+
+      const untouchedItems = project.items
+        .filter((item: any) => !targets.some((target) => this.isSameFurniture(target, item)))
+        .map((item: any) => ({ ...item }));
+      const consolidated = this.dedupeItems(this.sanitizeItems([...untouchedItems, ...retainedTargets]));
+      const quoteReadyItems = consolidated.filter((item) => item.width > 0 && item.height > 0 && item.depth > 0);
+      const nextInterpretation: any = buildProjectInterpretation(consolidated, sourceFiles);
+      nextInterpretation.review = {
+        mode: 'targeted_pdf_review_v1',
+        reviewedAt: new Date().toISOString(),
+        targetedItems: targets.length,
+        resolvedItems: resolvedTargetIds.length,
+        unresolvedItems: targets.length - resolvedTargetIds.length,
+        resolvedTargetIds,
+      };
+
+      await this.prisma.project.update({ where: { id }, data: { parseStatus: 'VALIDATING', parseProgress: 88 } });
+      await this.prisma.projectItem.deleteMany({ where: { projectId: id } });
+      for (const item of quoteReadyItems) {
+        await this.prisma.projectItem.create({
+          data: {
+            projectId: id,
+            environment: item.environment,
+            itemType: item.itemType,
+            description: item.description,
+            codigo: item.codigo,
+            width: item.width,
+            height: item.height,
+            depth: item.depth,
+            thickness: item.thickness,
+            quantity: item.quantity,
+            materialType: item.materialType,
+            cor: item.cor,
+            acabamento: item.acabamento,
+            observacoes: item.observacoes,
+            area: item.area,
+            volume: item.volume,
+          },
+        });
+      }
+
+      const previousTwin = project.digitalTwin && typeof project.digitalTwin === 'object' ? project.digitalTwin as any : {};
+      const engineering = quoteReadyItems.length ? buildEngineeringResult(quoteReadyItems, { projectId: id }) : null;
+      await this.prisma.project.update({
+        where: { id },
+        data: {
+          parseStatus: 'COMPLETED',
+          parseProgress: 100,
+          parseError: null,
+          digitalTwin: { ...previousTwin, interpretation: nextInterpretation, engineering },
+        },
+      });
+      console.log(`[PDF Review] DONE: ${resolvedTargetIds.length}/${targets.length} target(s) resolved.`);
+    } catch (error: any) {
+      console.error('[PDF Review] job failed:', error);
+      await this.prisma.project.update({
+        where: { id },
+        data: { parseStatus: 'FAILED', parseProgress: 100, parseError: error?.message || 'Falha na revisao dirigida do PDF.' },
+      });
+    }
+  }
 
   @Post(':id/parse')
   async parseProjectFile(
@@ -1068,6 +1466,14 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
       throw new HttpException('Project not found', HttpStatus.NOT_FOUND);
     }
 
+    let storedDocuments: StoredProjectDocument[];
+    try {
+      storedDocuments = this.persistProjectDocuments(id, files);
+    } catch (error) {
+      console.error('[AI Reader] Could not persist uploaded project documents:', error);
+      throw new HttpException('Nao foi possivel guardar os documentos para revisao.', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
     const filenames = files.map(f => f.filename || 'documento').join(', ');
     await this.prisma.project.update({
       where: { id },
@@ -1083,7 +1489,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
     await this.prisma.projectItem.deleteMany({ where: { projectId: id } });
 
     // Executa a análise pesada em BACKGROUND — agora processando TODOS os arquivos do batch.
-    this.runParseJobBatch(id, project, files).catch((e) =>
+    this.runParseJobBatch(id, project, files, storedDocuments).catch((e) =>
       console.error('[Parse Job] erro não tratado:', e),
     );
 
@@ -1094,12 +1500,14 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
   private async runParseJobBatch(
     id: string,
     project: any,
-    files: { filename: string; fileBase64: string; mimeType: string }[],
+    files: UploadedProjectFile[],
+    storedDocuments: StoredProjectDocument[] = [],
   ): Promise<void> {
     let allRawItems: any[] = [];
     let isRealParsing = false;
     let parseError: string | null = null;
     const allFilenames: string[] = [];
+    const sourceFiles: ProjectSourceFile[] = [];
 
     try {
       const cfg = this.getVisionConfig();
@@ -1164,9 +1572,13 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
 
         // CAMADA 1: Azure Document Intelligence (se configurado)
         let pageContexts: string[] = [];
-        if (isPdf) {
-          pageContexts = await this.analyzeLayout(buffer);
-        }
+        pageContexts = await this.analyzeLayout(buffer, isPdf ? 'application/pdf' : file.mimeType);
+        sourceFiles.push({
+          filename: fname,
+          mimeType: file.mimeType,
+          pages: pageImages.length,
+          hasStructuredContext: pageContexts.some((ctx) => Boolean(ctx && ctx.length > 20)),
+        });
 
         await this.prisma.project.update({
           where: { id },
@@ -1202,7 +1614,12 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
               content: `Analise este projeto executivo de marcenaria a partir do texto extraído e extraia TODAS as peças de TODOS os ambientes.\n\nTexto:\n${extractedText.substring(0, 14000)}`,
             },
           ];
-          rawItems = this.extractItemsFromContent(await this.callVision(cfg, messages, 8192));
+          rawItems = this.extractItemsFromContent(await this.callVision(cfg, messages, 8192)).map((item) => ({
+            ...item,
+            source: 'ocr_layout',
+            sourcePage: null,
+            sourceText: extractedText.substring(0, 1200),
+          }));
         }
 
         console.log(`[AI Reader] ${fname}: ${rawItems.length} raw item(s) extraídos.`);
@@ -1212,8 +1629,11 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
       // Consolida TODOS os itens de TODOS os arquivos
       const sanitized = this.sanitizeItems(allRawItems);
       const deduplicated = this.dedupeItems(sanitized);
+      const interpretation = buildProjectInterpretation(deduplicated, sourceFiles);
+      const quoteReadyItems = deduplicated.filter((item) => item.width > 0 && item.height > 0 && item.depth > 0);
       isRealParsing = deduplicated.length > 0;
-      console.log(`[AI Reader] Batch consolidado: ${allRawItems.length} raw → ${sanitized.length} sanitized → ${deduplicated.length} deduplicated item(s).`);
+      console.log(`[Interpretation] ${interpretation.summary.furnitureItems} movel(is), ${interpretation.summary.readyToQuote} pronto(s), ${interpretation.summary.pendingMeasurements} pendente(s), status=${interpretation.validation.status}.`);
+      console.log(`[AI Reader] Batch consolidado: ${allRawItems.length} raw → ${sanitized.length} sanitized → ${deduplicated.length} deduplicated → ${quoteReadyItems.length} quote-ready item(s).`);
 
       // Persist the extracted pieces.
       await this.prisma.project.update({
@@ -1222,7 +1642,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
       });
 
       const items = [];
-      for (const item of deduplicated) {
+      for (const item of quoteReadyItems) {
         const createdItem = await this.prisma.projectItem.create({
           data: {
             projectId: id,
@@ -1249,12 +1669,12 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
       const uniqueEnvironments = Array.from(new Set(items.map((i) => i.environment)));
 
       if (!parseError && items.length === 0) {
-        parseError = 'Nenhuma peça extraída dos documentos — verifique os créditos/configuração do provedor de IA e reprocesse.';
+        parseError = 'Nenhum movel com medidas completas foi extraido. Verifique se a prancha cotada esta legivel e reprocesse.';
       }
 
       // FASE SEMÂNTICA: Digital Twin
       let digitalTwin: any = null;
-      if (!parseError && items.length > 0) {
+      if (!parseError && items.length > 0 && process.env.ENABLE_DIGITAL_TWIN === 'true') {
         try {
           const cfgTwin = this.getVisionConfig();
           if (cfgTwin) {
@@ -1274,13 +1694,19 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
         }
       }
 
+      const engineering = !parseError && items.length > 0
+        ? buildEngineeringResult(items, { projectId: id })
+        : null;
+
       await this.prisma.project.update({
         where: { id },
         data: {
           parseStatus: parseError ? 'FAILED' : 'COMPLETED',
           parseProgress: 100,
           parseError,
-          digitalTwin: digitalTwin ?? undefined,
+          digitalTwin: digitalTwin
+            ? { ...digitalTwin, interpretation, engineering, sourceDocuments: storedDocuments }
+            : { environments: [], audit: { warnings: [], stats: { environments: 0, furnitures: 0, components: 0 } }, interpretation, engineering, sourceDocuments: storedDocuments },
         },
       });
 
