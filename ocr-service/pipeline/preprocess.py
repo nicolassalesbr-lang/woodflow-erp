@@ -51,4 +51,5 @@ def preprocess_image(image_input: ImageInput, deskew: bool = True):
     kernel = np.array([[0, -1, 0], [-1, 5,-1], [0, -1, 0]])
     sharpened = cv2.filter2D(processed, -1, kernel)
     
-    return sharpened
+    # PaddleOCR 3.x expects a three-channel image even after binarization.
+    return cv2.cvtColor(sharpened, cv2.COLOR_GRAY2BGR)
