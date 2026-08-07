@@ -1,13 +1,25 @@
 import cv2
 import numpy as np
+from os import PathLike
+from typing import Union
 
-def preprocess_image(image_path: str, deskew: bool = True):
+ImageInput = Union[str, PathLike, np.ndarray]
+
+
+def preprocess_image(image_input: ImageInput, deskew: bool = True):
     """
     Applies OpenCV preprocessing techniques tailored for architectural plans and dimensions.
+
+    Accepts either a filesystem path or an image already loaded as a NumPy array.
+    The OCR pipeline uses arrays for both uploaded images and rendered PDF pages.
     """
-    image = cv2.imread(image_path)
+    if isinstance(image_input, np.ndarray):
+        image = image_input.copy()
+    else:
+        image = cv2.imread(str(image_input))
+
     if image is None:
-        raise ValueError(f"Could not read image: {image_path}")
+        raise ValueError(f"Could not read image: {image_input}")
 
     # Convert to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
