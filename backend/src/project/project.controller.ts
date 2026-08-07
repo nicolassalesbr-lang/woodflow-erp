@@ -647,9 +647,13 @@ Nota: Se a dimensão não está cotada, use null:
     if (!ocrUrl) return [];
 
     try {
+      let filename = 'document.pdf';
+      if (contentType === 'image/jpeg' || contentType === 'image/jpg') filename = 'document.jpg';
+      else if (contentType === 'image/png') filename = 'document.png';
+      
       const formData = new FormData();
       const blob = new Blob([fileBuffer], { type: contentType });
-      formData.append('file', blob, 'document.pdf');
+      formData.append('file', blob, filename);
 
       const submit = await fetch(ocrUrl, {
         method: 'POST',
