@@ -766,7 +766,8 @@ Nota: Se a dimensÃ£o nÃ£o estÃ¡ cotada, use null:
           `O OCR pode cometer erros ou omitir textos verticais/pequenos. Se você ler uma cota claramente na imagem, CONFIE NA SUA VISÃO, mesmo que ela não apareça no OCR. Use o OCR apenas como guia espacial ` +
           `(pela proximidade das posiÃ§Ãµes x,y). Ainda assim aplique a regra cmâ†’mm (Ã—10). ` +
           `Você DEVE se esforçar ao máximo para encontrar e extrair as medidas (Largura, Altura e Profundidade) de cada móvel usando sua visão. Se a medida estiver visível na imagem (mesmo que com zoom ou texto pequeno), você DEVE preenchê-la no JSON. Use null APENAS se a medida realmente não existir em nenhum lugar do desenho. ` +
-          `Para evitar JSON longo/truncado, priorize no maximo 12 MOVEIS MONTADOS desta folha e ignore subpecas. ` +É extremamente importante que você preencha width, height e depth com valores numéricos lidos da imagem. Não deixe as medidas em branco (null) se você conseguir enxergar os números no desenho. Apenas use null em último caso.\n\n${structuredContext}`,
+          `Para evitar JSON longo/truncado, priorize no máximo 25 MÓVEIS MONTADOS desta folha e ignore subpeças. ` +
+          `É extremamente importante que você preencha width, height e depth com valores numéricos lidos da imagem. Não deixe as medidas em branco (null) se você conseguir enxergar os números no desenho. Apenas use null em último caso.\n\n${structuredContext}`,
       });
     }
 
