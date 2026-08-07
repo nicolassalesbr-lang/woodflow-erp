@@ -260,6 +260,7 @@ export default function Projects() {
   const [projects, setProjects] = useState<any[]>([]);
   const [selectedProj, setSelectedProj] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
+  const [reviewingPdf, setReviewingPdf] = useState(false);
   const [parseStage, setParseStage] = useState("");
   const [newProjName, setNewProjName] = useState("");
   const [newProjDesc, setNewProjDesc] = useState("");
@@ -311,6 +312,10 @@ export default function Projects() {
 
   const selectedItems = selectedProj?.items || [];
   const interpretation = selectedProj?.digitalTwin?.interpretation;
+  const reviewableItems = (interpretation?.environments || [])
+    .flatMap((environment: any) => environment.items || [])
+    .filter((item: any) => item.quoteStatus !== "READY" || (item.validation?.issues || []).some((issue: any) => issue.severity === "WARNING"));
+  const hasStoredSourceDocuments = Boolean(selectedProj?.digitalTwin?.sourceDocuments?.length);
   const engineering = budget?.engineering || selectedProj?.digitalTwin?.engineering || null;
   
   const environments = useMemo(() => {
@@ -405,7 +410,8 @@ export default function Projects() {
     EXTRACTING: "Lendo folhas...",
     QUEUE: "Na fila...",
     INTERPRETING: "Interpretando desenhos...",
-    VALIDATING: "Montando modelo 3D...",
+    VALIDATING: "Validando medidas e materiais...",
+    REVIEWING: "Revisando cotas pendentes no PDF...",
   };
 
   // Parse assíncrono: acompanha parseStatus/parseProgress até concluir (evita 504 do nginx).
@@ -477,6 +483,36 @@ export default function Projects() {
     await pollParseStatus(projectId);
     setUploading(false);
     setParseStage("");
+  };
+
+  const reviewPdf = async () => {
+    if (!selectedProj || reviewingPdf || reviewableItems.length === 0) return;
+    setReviewingPdf(true);
+    setParseStage("Selecionando pendencias para revisao...");
+    try {
+      const res = await fetch(`${getApiUrl()}/api/projects/${selectedProj.id}/review-pdf`, {
+        method: "POST",
+        headers: { Authorization: "Bearer mock-jwt-token-2026" },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data?.message || "Nao foi possivel iniciar a revisao do PDF.");
+        return;
+      }
+      if (!data.started) {
+        alert(data.message || "Nao ha pendencias para revisar.");
+        return;
+      }
+      setParseStage(`Revisando ${data.targets || reviewableItems.length} item(ns) com pendencia...`);
+      await pollParseStatus(selectedProj.id);
+      await fetchProjects();
+    } catch (error) {
+      console.error("Erro na revisao dirigida do PDF:", error);
+      alert("Erro ao conectar com o servidor para revisar o PDF.");
+    } finally {
+      setReviewingPdf(false);
+      setParseStage("");
+    }
   };
 
   const calculateBudget = async () => {
@@ -1779,11 +1815,11 @@ export default function Projects() {
   }, [nestingSheets, selectedSheetIndex]);
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6 overflow-hidden">
       {/* Upper Hero Card */}
       <section className="overflow-hidden rounded-2xl border border-[#e8d4b8]/12 bg-[#211811]/78">
-        <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr]">
-          <div className="p-6 md:p-8">
+        <div className="grid min-w-0 grid-cols-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+          <div className="min-w-0 p-6 md:p-8">
             <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#d6ad79]/28 bg-[#d6ad79]/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-[#ead5ba]">
               <Sparkles className="h-3.5 w-3.5" />
               Projetos sob medida
@@ -1796,7 +1832,7 @@ export default function Projects() {
             </p>
           </div>
 
-          <div className="border-t border-[#e8d4b8]/10 bg-[#fff7ed]/[0.035] p-6 md:p-8 lg:border-l lg:border-t-0">
+          <div className="min-w-0 border-t border-[#e8d4b8]/10 bg-[#fff7ed]/[0.035] p-6 md:p-8 lg:border-l lg:border-t-0">
             <button
               onClick={() => setShowAddForm((value) => !value)}
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#ead5ba] px-5 py-3 text-sm font-bold text-[#20170f] transition hover:bg-[#ffe4bf]"
@@ -1835,16 +1871,16 @@ export default function Projects() {
       </section>
 
       {/* Main Grid */}
-      <section className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+      <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(0,1fr)]">
         {/* Left projects list */}
-        <aside className="space-y-3 lg:col-span-4 xl:col-span-4">
+        <aside className="min-w-0 space-y-3">
           {projects.map((project) => {
             const active = selectedProj?.id === project.id;
             return (
               <button
                 key={project.id}
                 onClick={() => setSelectedProj(project)}
-                className={`w-full rounded-2xl border p-5 text-left transition ${
+                className={`min-w-0 w-full rounded-2xl border p-5 text-left transition ${
                   active 
                     ? "border-[#d6ad79]/38 bg-[#d6ad79]/12" 
                     : "border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] hover:border-[#d6ad79]/28"
@@ -1870,18 +1906,18 @@ export default function Projects() {
         </aside>
 
         {/* Right selected project details */}
-        <main className="min-h-[520px] rounded-2xl border border-[#e8d4b8]/12 bg-[#211811]/70 p-5 md:p-7 lg:col-span-8 xl:col-span-8">
+        <main className="min-w-0 overflow-hidden rounded-2xl border border-[#e8d4b8]/12 bg-[#211811]/70 p-5 md:p-7">
           {selectedProj ? (
-            <div className="space-y-7">
+            <div className="min-w-0 space-y-7">
               {/* Selected Project Header */}
-              <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-start">
-                <div>
+              <div className="flex min-w-0 flex-col justify-between gap-4 2xl:flex-row 2xl:items-start">
+                <div className="min-w-0">
                   <div className="mb-3 flex flex-wrap items-center gap-2">
                     <span className="rounded-full bg-[#d6ad79]/14 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-[#ead5ba]">
                       {statusLabel[selectedProj.status] || selectedProj.status}
                     </span>
                     {selectedProj.originalFileUrl && (
-                      <span className="rounded-full border border-[#e8d4b8]/12 px-3 py-1 text-xs text-[#bba890]">
+                      <span className="max-w-full truncate rounded-full border border-[#e8d4b8]/12 px-3 py-1 text-xs text-[#bba890]">
                         {selectedProj.originalFileUrl}
                       </span>
                     )}
@@ -1894,7 +1930,7 @@ export default function Projects() {
                   </p>
                 </div>
 
-                <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
                   <label
                     className={`inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#d6ad79]/30 bg-[#d6ad79]/10 px-4 py-3 text-sm font-bold text-[#ead5ba] transition hover:bg-[#d6ad79]/16 ${
                       uploading ? "pointer-events-none opacity-60" : ""
@@ -1909,11 +1945,23 @@ export default function Projects() {
                       onChange={(event) => handleFileChange(event, selectedProj.id)}
                     />
                   </label>
+                  {reviewableItems.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={reviewPdf}
+                      disabled={uploading || reviewingPdf}
+                      title={hasStoredSourceDocuments ? "Reler somente os itens pendentes ou com alerta" : "Este projeto precisa que o PDF seja reenviado uma vez para habilitar a releitura"}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#e8d4b8]/20 bg-[#211811] px-4 py-3 text-sm font-bold text-[#ead5ba] transition hover:border-[#d6ad79]/50 hover:bg-[#d6ad79]/10 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <RotateCw className={`h-4 w-4 ${reviewingPdf ? "animate-spin" : ""}`} />
+                      {reviewingPdf ? (parseStage || "Revisando PDF...") : "Revisar PDF"}
+                    </button>
+                  )}
                 </div>
               </div>
 
               {/* Navigation Tabs */}
-              <div className="flex border-b border-[#e8d4b8]/10">
+              <div className="flex overflow-x-auto border-b border-[#e8d4b8]/10">
                 <button
                   onClick={() => setActiveTab("details")}
                   className={`border-b-2 px-5 py-3 text-sm font-bold transition ${
@@ -1973,8 +2021,8 @@ export default function Projects() {
 
                   {interpretation && (
                     <div className="rounded-xl border border-[#d6ad79]/18 bg-[#211811]/70 p-4">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                        <div>
+                      <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                        <div className="min-w-0">
                           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#d6ad79]">
                             Motor tecnico de interpretacao
                           </p>
@@ -1986,7 +2034,7 @@ export default function Projects() {
                                 : "Interpretacao precisa de revisao"}
                           </h3>
                         </div>
-                        <div className="grid grid-cols-3 gap-2 text-center sm:min-w-[360px]">
+                        <div className="grid w-full grid-cols-3 gap-2 text-center sm:w-auto sm:min-w-[320px]">
                           <div className="rounded-lg border border-[#e8d4b8]/12 bg-[#100b08]/55 px-3 py-2">
                             <p className="text-lg font-black text-[#fff8f0]">{interpretation.summary?.readyToQuote || 0}</p>
                             <p className="text-[10px] uppercase tracking-[0.12em] text-[#a99680]">prontos</p>
@@ -2013,14 +2061,21 @@ export default function Projects() {
                           </div>
                         </div>
                       )}
+                      {interpretation.review && (
+                        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[#e8d4b8]/10 pt-3 text-xs text-[#cdbca7]">
+                          <span className="font-semibold text-[#ead5ba]">Ultima revisao do PDF:</span>
+                          <span>{interpretation.review.resolvedItems || 0} item(ns) completado(s)</span>
+                          <span className="text-[#a99680]">{interpretation.review.unresolvedItems || 0} ainda precisam de confirmacao</span>
+                        </div>
+                      )}
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_300px]">
+                  <div className="grid min-w-0 grid-cols-1 gap-5 2xl:grid-cols-[minmax(0,1fr)_300px]">
                     {/* Left: Ambientes e Medidas agrupados */}
-                    <div>
-                      <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-[#e8d4b8]/10 pb-3">
-                        <div>
+                    <div className="min-w-0">
+                      <div className="mb-4 flex min-w-0 flex-col gap-3 border-b border-[#e8d4b8]/10 pb-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
                           <h3 className="text-lg font-semibold tracking-tight text-[#fff8f0]">
                             Ambientes e medidas
                           </h3>
@@ -2032,10 +2087,10 @@ export default function Projects() {
                         </div>
 
                         {/* Toggle Mode Button */}
-                        <div className="flex items-center gap-1 bg-[#18120d] p-1 rounded-xl border border-[#e8d4b8]/15 shrink-0">
+                        <div className="flex w-full shrink-0 items-center gap-1 overflow-x-auto rounded-xl border border-[#e8d4b8]/15 bg-[#18120d] p-1 sm:w-auto">
                           <button
                             onClick={() => setViewMode('raw')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                            className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                               viewMode === 'raw'
                                 ? "bg-[#ead5ba] text-[#20170f] shadow"
                                 : "text-[#bba890] hover:text-[#ead5ba]"
@@ -2045,7 +2100,7 @@ export default function Projects() {
                           </button>
                           <button
                             onClick={() => setViewMode('all')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                            className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                               viewMode === 'all'
                                 ? "bg-[#ead5ba] text-[#20170f] shadow"
                                 : "text-[#bba890] hover:text-[#ead5ba]"
@@ -2067,8 +2122,8 @@ export default function Projects() {
                             const envArea = envItems.reduce((s: number, i: any) => s + (i.area || 0), 0);
                             const envQty = envItems.reduce((s: number, i: any) => s + (i.quantity || 1), 0);
                             return (
-                              <div key={env}>
-                                <div className="mb-2.5 flex items-center justify-between gap-3 border-b border-[#e8d4b8]/10 pb-2">
+                              <div key={env} className="min-w-0">
+                                <div className="mb-2.5 flex min-w-0 items-center justify-between gap-3 border-b border-[#e8d4b8]/10 pb-2">
                                   <h4 className="text-sm font-bold uppercase tracking-[0.14em] text-[#c89a63]">{env}</h4>
                                   <span className="shrink-0 text-[11px] text-[#a99680]">
                                     {envItems.length} móveis · {envQty} un · {envArea.toFixed(1)} m²
@@ -2097,7 +2152,7 @@ export default function Projects() {
                     </div>
 
                     {/* Right: Materiais + Fluxo */}
-                    <aside className="space-y-5">
+                    <aside className="min-w-0 space-y-5">
                       {selectedItems.length > 0 && (
                         <div className="rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] p-5">
                           <h3 className="mb-3 font-semibold tracking-tight text-[#fff8f0]">Materiais</h3>
@@ -2168,7 +2223,7 @@ export default function Projects() {
               {activeTab === "model3d" && (selectedProj?.digitalTwin ? (
                 <ThreeViewer project={selectedProj} />
               ) : (
-                <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_320px]">
+                <div className="grid min-w-0 grid-cols-1 gap-5 2xl:grid-cols-[minmax(0,1fr)_320px]">
                   {/* Visualizer Canvas */}
                   <div className="relative rounded-2xl border border-[#e8d4b8]/10 bg-[#0b0907] p-1 flex flex-col justify-between">
                     {faces3D.length ? (
@@ -2425,9 +2480,9 @@ export default function Projects() {
                         </div>
                       </div>
 
-                      <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_360px]">
-                        <div className="overflow-hidden rounded-lg border border-[#e8d4b8]/10">
-                          <div className="grid grid-cols-[1fr_90px_90px_90px] gap-2 bg-[#18120d] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[#a99680]">
+                      <div className="mt-5 grid min-w-0 grid-cols-1 gap-3 2xl:grid-cols-[minmax(0,1fr)_360px]">
+                        <div className="min-w-0 overflow-hidden rounded-lg border border-[#e8d4b8]/10">
+                          <div className="grid grid-cols-[minmax(0,1fr)_72px_56px_82px] gap-2 bg-[#18120d] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[#a99680] sm:grid-cols-[minmax(0,1fr)_90px_90px_90px]">
                             <span>Componente</span>
                             <span className="text-right">Consumo</span>
                             <span className="text-right">Unid.</span>
@@ -2435,7 +2490,7 @@ export default function Projects() {
                           </div>
                           <div className="max-h-64 overflow-y-auto">
                             {(engineering.components || []).slice(0, 36).map((component: any, idx: number) => (
-                              <div key={`${component.code || idx}`} className="grid grid-cols-[1fr_90px_90px_90px] gap-2 border-t border-[#e8d4b8]/6 px-3 py-2 text-xs text-[#ead5ba]">
+                              <div key={`${component.code || idx}`} className="grid grid-cols-[minmax(0,1fr)_72px_56px_82px] gap-2 border-t border-[#e8d4b8]/6 px-3 py-2 text-xs text-[#ead5ba] sm:grid-cols-[minmax(0,1fr)_90px_90px_90px]">
                                 <div className="min-w-0">
                                   <p className="truncate font-semibold text-[#fff8f0]">{component.label}</p>
                                   <p className="truncate text-[11px] text-[#a99680]">{component.furniture}</p>
@@ -2448,7 +2503,7 @@ export default function Projects() {
                           </div>
                         </div>
 
-                        <div className="rounded-lg border border-[#e8d4b8]/10 bg-[#18120d]/45 p-4">
+                        <div className="min-w-0 rounded-lg border border-[#e8d4b8]/10 bg-[#18120d]/45 p-4">
                           <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#c89a63]">
                             Materiais calculados
                           </p>
@@ -2479,9 +2534,9 @@ export default function Projects() {
                   )}
 
                   {/* Calculations setup */}
-                  <section className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_380px]">
+                  <section className="grid min-w-0 grid-cols-1 gap-5 2xl:grid-cols-[minmax(0,1fr)_360px]">
                     {/* Left: Interactive nesting canvas */}
-                    <div className="rounded-2xl border border-[#e8d4b8]/10 bg-[#0b0907] p-5 space-y-4">
+                    <div className="min-w-0 rounded-2xl border border-[#e8d4b8]/10 bg-[#0b0907] p-5 space-y-4">
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-[#e8d4b8]/10">
                         <div>
                           <h3 className="font-semibold text-[#fff8f0]">Plano de Corte (Nesting 2D)</h3>
@@ -2764,11 +2819,11 @@ function ItemDetailCard({ item }: { item: any }) {
   return (
     <div 
       onClick={() => setExpanded(!expanded)}
-      className="rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] p-3.5 transition hover:border-[#d6ad79]/40 cursor-pointer select-none group space-y-3"
+      className="min-w-0 rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] p-3.5 transition hover:border-[#d6ad79]/40 cursor-pointer select-none group space-y-3"
     >
       {/* Compact Collapsed Header (Always Visible) */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
           {item.codigo ? (
             <span className="flex h-5 min-w-[20px] items-center justify-center rounded bg-[#d6ad79] px-1.5 text-[10px] font-black text-[#20170f]">
               {item.codigo}
@@ -2786,8 +2841,8 @@ function ItemDetailCard({ item }: { item: any }) {
 
         {/* Compact Dimensions L (mm) | A (mm) | P (mm) */}
         {hasMeasures && (
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="flex items-center gap-2.5 bg-[#211811]/80 px-3 py-1.5 rounded-lg border border-[#e8d4b8]/10 text-xs font-mono text-[#e8d9c6]">
+          <div className="flex w-full shrink-0 items-center gap-3 sm:w-auto">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-[#e8d4b8]/10 bg-[#211811]/80 px-3 py-1.5 text-xs font-mono text-[#e8d9c6] sm:flex-none">
               <span><span className="text-[#a99680] text-[10px]">L:</span> <strong className="text-white">{item.width}</strong></span>
               <span><span className="text-[#a99680] text-[10px]">A:</span> <strong className="text-white">{item.height}</strong></span>
               <span><span className="text-[#a99680] text-[10px]">P:</span> <strong className="text-white">{item.depth}</strong></span>
