@@ -371,15 +371,21 @@ Nota: Se a dimensão não está cotada, use null:
   private buildTargetedReviewPrompt(targets: any[]): string {
     const targetList = targets.map((target, index) => {
       const dimensions = target.dimensions || {};
-      const missing = [
-        !dimensions.width && 'largura',
-        !dimensions.height && 'altura',
-        !dimensions.depth && 'profundidade',
+      const brief = target.reviewBrief || {};
+      const confirmed = brief.confirmedDimensions?.length
+        ? brief.confirmedDimensions.join(', ')
+        : [dimensions.width && `L=${dimensions.width} mm`, dimensions.height && `A=${dimensions.height} mm`, dimensions.depth && `P=${dimensions.depth} mm`].filter(Boolean).join(', ') || 'nenhuma';
+      const missing = brief.missingDimensions?.join(', ') || [
+        !dimensions.width && 'largura (L)',
+        !dimensions.height && 'altura (A)',
+        !dimensions.depth && 'profundidade (P)',
       ].filter(Boolean).join(', ') || 'validar medidas';
-      return `${index + 1}. ${target.environment || 'Ambiente'} | ${target.description || target.itemType || 'Movel'} | codigo ${target.codigo || 'sem codigo'} | pendencia: ${missing}`;
+      const objectives = brief.objectives?.join(' ') || target.validation?.issues?.map((issue: any) => issue.message).join(' ') || 'Conferir medidas e material.';
+      const evidence = String(brief.evidenceSummary || target.evidence?.notes || target.evidence?.sourceText || '').replace(/\s+/g, ' ').slice(0, 420);
+      return `${index + 1}. Ambiente: ${target.environment || 'Ambiente'}\n   Movel: ${target.description || target.itemType || 'Movel'} | codigo: ${target.codigo || 'sem codigo'}\n   Ja confirmado: ${confirmed}\n   Falta validar: ${missing}\n   Objetivo: ${objectives}\n   Folha de origem: ${brief.sourcePage || target.evidence?.sourcePage || 'nao identificada'}\n   Evidencia anterior: ${evidence || 'nenhuma - localizar diretamente na prancha'}`;
     }).join('\n');
 
-    return `${this.buildSystemPrompt()}\n\nMODO REVISAO DIRIGIDA DO PDF\nVoce esta revisando APENAS os moveis abaixo, pois ficaram pendentes ou com alerta na primeira leitura. Leia com maximo cuidado as cotas, setas, vistas e texto OCR relacionados a eles.\n\nITENS-ALVO:\n${targetList}\n\nREGRAS ADICIONAIS:\n- Retorne SOMENTE itens que correspondam claramente a um dos itens-alvo; nao crie novos moveis.\n- Para cada dimensao, use somente uma cota explicitamente visivel/escrita no PDF. Converta cm para mm quando aplicavel.\n- Se uma medida nao puder ser associada sem ambiguidade ao movel, mantenha null e explique em observacoes.\n- Em observacoes, registre a origem da cota de forma curta, por exemplo: \"L 1274 mm na vista frontal, A 600 mm, P 350 mm no corte\".\n- Nao estime medidas por proporcao, padrao de marcenaria, eletrodomestico ou render.\n- Preserve o ambiente, codigo e descricao quando estiverem identificaveis.`;
+    return `${this.buildSystemPrompt()}\n\nMODO REVISAO DIRIGIDA DO PDF\nVoce esta revisando APENAS os moveis abaixo, pois ficaram pendentes ou com alerta na primeira leitura. Leia com maximo cuidado as cotas, setas, vistas e texto OCR relacionados a eles.\n\nITENS-ALVO:\n${targetList}\n\nREGRAS ADICIONAIS:\n- Retorne SOMENTE itens que correspondam claramente a um dos itens-alvo; nao crie novos moveis.\n- Para cada dimensao, use somente uma cota explicitamente visivel/escrita no PDF. Converta cm para mm quando aplicavel.\n- Se uma medida nao puder ser associada sem ambiguidade ao movel, mantenha null e explique em observacoes.\n- Em observacoes, registre a origem da cota de forma curta, por exemplo: \"Evidencia: L 1274 mm na vista frontal, A 600 mm, P 350 mm no corte\". Quando houver pendencia, diga exatamente qual vista/cota nao foi localizada.\n- Leia as vistas frontal, lateral, corte e planta como fontes complementares do MESMO movel. Pode completar L, A e P usando vistas diferentes, desde que codigo, posicao ou desenho confirmem que pertencem ao mesmo modulo.\n- Use medidas parciais ja confirmadas como ancora. Nao substitua uma medida confirmada por outra sem explicar a divergencia em observacoes.\n- Nao estime medidas por proporcao, padrao de marcenaria, eletrodomestico ou render.\n- Preserve o ambiente, codigo e descricao quando estiverem identificaveis.`;
   }
 
   private projectUploadDirectory(projectId: string): string {
@@ -622,62 +628,57 @@ Nota: Se a dimensão não está cotada, use null:
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  //  CAMADA 1 — AZURE AI DOCUMENT INTELLIGENCE (layout/OCR + cotas + tabelas)
+  //  CAMADA 1 — LOCAL PADDLEOCR MICROSERVICE (OCR + PyMuPDF)
   // ─────────────────────────────────────────────────────────────────────────
 
-  /** Resolve a config do Azure Document Intelligence, ou null se não configurado. */
-  private getDocIntelConfig(): { endpoint: string; key: string } | null {
-    const key = process.env.AZURE_AI_DOC_INTEL_KEY;
-    const endpoint = process.env.AZURE_AI_DOC_INTEL_ENDPOINT;
-    if (!key || !endpoint) return null;
-    return { endpoint: endpoint.replace(/\/$/, ''), key };
+  /** Verifica se o OCR local está habilitado. */
+  private getLocalOcrUrl(): string | null {
+    return process.env.LOCAL_OCR_ENDPOINT || 'http://localhost:8000/analyze';
   }
 
   /**
-   * Envia PDF/imagem ao modelo prebuilt-layout do Azure Document Intelligence e retorna,
-   * por página (índice 0-based), um contexto estruturado (texto OCR + tabelas em
-   * markdown + cotas numéricas com posição). Retorna [] se não configurado ou em
-   * caso de falha — o pipeline então segue só com a imagem (fallback silencioso).
+   * Envia PDF/imagem ao microserviço local PaddleOCR e retorna,
+   * por página (índice 0-based), um contexto estruturado (texto OCR +
+   * cotas numéricas com posição). Retorna [] se o serviço estiver offline
+   * em caso de falha — o pipeline então segue só com a imagem (fallback silencioso).
    */
   private async analyzeLayout(fileBuffer: Buffer, contentType: string = 'application/pdf'): Promise<string[]> {
-    const di = this.getDocIntelConfig();
-    if (!di) return [];
-
-    const apiVersion = process.env.AZURE_AI_DOC_INTEL_API_VERSION || '2024-11-30';
-    const isNewApi = apiVersion >= '2024-11-30';
-    const analyzePath = isNewApi
-      ? `/documentintelligence/documentModels/prebuilt-layout:analyze?api-version=${apiVersion}`
-      : `/formrecognizer/documentModels/prebuilt-layout:analyze?api-version=${apiVersion}`;
+    const ocrUrl = this.getLocalOcrUrl();
+    if (!ocrUrl) return [];
 
     try {
-      const submit = await fetch(`${di.endpoint}${analyzePath}`, {
+      let filename = 'document.pdf';
+      if (contentType === 'image/jpeg' || contentType === 'image/jpg') filename = 'document.jpg';
+      else if (contentType === 'image/png') filename = 'document.png';
+      
+      const formData = new FormData();
+      const fileBytes = new Uint8Array(fileBuffer.byteLength);
+      fileBytes.set(fileBuffer);
+      const blob = new Blob([fileBytes.buffer], { type: contentType });
+      formData.append('file', blob, filename);
+
+      const submit = await fetch(ocrUrl, {
         method: 'POST',
-        headers: { 'Ocp-Apim-Subscription-Key': di.key, 'Content-Type': contentType || 'application/octet-stream' },
-        body: fileBuffer as any,
+        body: formData,
       });
-      if (submit.status !== 202) {
-        console.warn('[Doc Intelligence] submit falhou:', submit.status, (await submit.text()).slice(0, 200));
+
+      if (!submit.ok) {
+        console.warn('[PaddleOCR] submit falhou:', submit.status, (await submit.text()).slice(0, 200));
         return [];
       }
-      const opLocation = submit.headers.get('operation-location') || submit.headers.get('Operation-Location');
-      if (!opLocation) return [];
 
-      // Polling da operação assíncrona (até ~60s)
-      let analyzeResult: any = null;
-      for (let attempt = 0; attempt < 30; attempt++) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const poll = await fetch(opLocation, { headers: { 'Ocp-Apim-Subscription-Key': di.key } });
-        const data = await poll.json();
-        if (data.status === 'succeeded') { analyzeResult = data.analyzeResult; break; }
-        if (data.status === 'failed') { console.warn('[Doc Intelligence] análise falhou.'); return []; }
+      const data = await submit.json();
+      if (data.status !== 'completed') {
+        console.warn('[PaddleOCR] análise falhou.', data.status);
+        return [];
       }
-      if (!analyzeResult) { console.warn('[Doc Intelligence] timeout no polling.'); return []; }
 
-      const contexts = this.buildPageContexts(analyzeResult);
-      console.log(`[Doc Intelligence] contexto estruturado de ${contexts.length} página(s).`);
+      // O backend Python já devolve `contexts` populado corretamente
+      const contexts = data.contexts || [];
+      console.log(`[PaddleOCR] contexto estruturado de ${contexts.length} página(s).`);
       return contexts;
     } catch (err) {
-      console.warn('[Doc Intelligence] erro:', err);
+      console.warn('[PaddleOCR] erro de conexão com o microserviço local (verifique se está rodando):', err);
       return [];
     }
   }
