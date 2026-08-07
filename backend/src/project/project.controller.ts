@@ -1,4 +1,4 @@
-﻿import { Controller, Get, Post, Body, Param, Headers, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Headers, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import * as fs from 'fs';
@@ -765,10 +765,8 @@ Nota: Se a dimensÃ£o nÃ£o estÃ¡ cotada, use null:
           `\n\nDADOS ESTRUTURADOS DESTA FOLHA (extraÃ­dos por OCR/layout do Azure Document Intelligence). ` +
           `O OCR pode cometer erros ou omitir textos verticais/pequenos. Se você ler uma cota claramente na imagem, CONFIE NA SUA VISÃO, mesmo que ela não apareça no OCR. Use o OCR apenas como guia espacial ` +
           `(pela proximidade das posiÃ§Ãµes x,y). Ainda assim aplique a regra cmâ†’mm (Ã—10). ` +
-          `Se uma medida NÃO estiver escrita no desenho, use null; nunca registre medida estimada da sua cabeça. ` +
-          `Para evitar JSON longo/truncado, priorize no maximo 12 MOVEIS MONTADOS desta folha e ignore subpecas. ` +
-          
-ao use as palavras "assumida", "estimada" ou "aproximada": cada width/height/depth precisa vir de cota visivel ou texto OCR.\n\n${structuredContext}`,
+          `Você DEVE se esforçar ao máximo para encontrar e extrair as medidas (Largura, Altura e Profundidade) de cada móvel usando sua visão. Se a medida estiver visível na imagem (mesmo que com zoom ou texto pequeno), você DEVE preenchê-la no JSON. Use null APENAS se a medida realmente não existir em nenhum lugar do desenho. ` +
+          `Para evitar JSON longo/truncado, priorize no maximo 12 MOVEIS MONTADOS desta folha e ignore subpecas. ` +É extremamente importante que você preencha width, height e depth com valores numéricos lidos da imagem. Não deixe as medidas em branco (null) se você conseguir enxergar os números no desenho. Apenas use null em último caso.\n\n${structuredContext}`,
       });
     }
 
@@ -1746,3 +1744,7 @@ Use milÃ­metros para TODAS as dimensÃµes e coordenadas X, Y, Z. NÃ£o simpl
     }
   }
 }
+
+
+
+
