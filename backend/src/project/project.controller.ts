@@ -304,6 +304,8 @@ REGRAS DE MEDIDAS E COTAS (OBRIGATÃ“RIAS)
    - width (largura L): dimensÃ£o horizontal na vista frontal ou elevaÃ§Ã£o.
    - height (altura A): dimensÃ£o vertical na vista frontal ou elevaÃ§Ã£o.
    - depth (profundidade P): profundidade externa frente/fundo lida no corte, planta ou 3D.
+   - Em Planta Baixa (vista superior), as dimensões desenhadas são Largura e Profundidade. A Altura costuma vir escrita em texto (ex: "Alt. 250cm").
+   - Cuidado com a sigla "Susp." (Suspenso): refere-se à distâcia do chão, não à altura do móvel.
 
 3. MATERIAIS E CORES:
    - Extraia o material/cor indicado na observaÃ§Ã£o ou legenda (ex: "MDF Gianduia Trama (Duratex)", "MDF FreijÃ³", "Quartzo Branco").
@@ -765,7 +767,8 @@ Nota: Se a dimensÃ£o nÃ£o estÃ¡ cotada, use null:
           `(pela proximidade das posiÃ§Ãµes x,y). Ainda assim aplique a regra cmâ†’mm (Ã—10). ` +
           `Se uma medida NÃO estiver escrita no desenho, use null; nunca registre medida estimada da sua cabeça. ` +
           `Para evitar JSON longo/truncado, priorize no maximo 12 MOVEIS MONTADOS desta folha e ignore subpecas. ` +
-          `Nao use as palavras "assumida", "estimada" ou "aproximada": cada width/height/depth precisa vir de cota visivel ou texto OCR.\n\n${structuredContext}`,
+          
+ao use as palavras "assumida", "estimada" ou "aproximada": cada width/height/depth precisa vir de cota visivel ou texto OCR.\n\n${structuredContext}`,
       });
     }
 
