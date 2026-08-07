@@ -1672,8 +1672,8 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
 
       const uniqueEnvironments = Array.from(new Set(items.map((i) => i.environment)));
 
-      if (!parseError && items.length === 0) {
-        parseError = 'Nenhum movel com medidas completas foi extraido. Verifique se a prancha cotada esta legivel e reprocesse.';
+      if (!parseError && items.length === 0 && deduplicated.length === 0) {
+        parseError = 'Nenhum movel extraido. Verifique se as imagens contem ambientes ou móveis validos.';
       }
 
       // FASE SEMÂNTICA: Digital Twin
