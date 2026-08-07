@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Headers, HttpException, HttpStatus } from '@nestjs/common';
+﻿import { Controller, Get, Post, Body, Param, Headers, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import * as fs from 'fs';
@@ -90,9 +90,9 @@ export class ProjectController {
     });
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  //  PDF → IMAGES
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  //  PDF â†’ IMAGES
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Convert a PDF buffer to an array of base64 PNG strings, one per page.
@@ -132,20 +132,20 @@ export class ProjectController {
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   //  VISION / LLM
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
-   * Provedores com quota esgotada/credencial inválida nesta sessão do processo.
-   * Um provedor morto é pulado até o próximo restart do PM2.
+   * Provedores com quota esgotada/credencial invÃ¡lida nesta sessÃ£o do processo.
+   * Um provedor morto Ã© pulado atÃ© o prÃ³ximo restart do PM2.
    */
   private deadProviders = new Set<string>();
 
   /**
-   * Lista ordenada de provedores Vision disponíveis (Gemini, OpenAI e/ou Azure).
+   * Lista ordenada de provedores Vision disponÃ­veis (Gemini, OpenAI e/ou Azure).
    * VISION_PROVIDER=azure|gemini inverte a prioridade. O failover em callVision pula
-   * automaticamente para o próximo quando um deles fica sem quota.
+   * automaticamente para o prÃ³ximo quando um deles fica sem quota.
    */
   private getVisionConfigs(): VisionConfig[] {
     const configs: VisionConfig[] = [];
@@ -162,7 +162,7 @@ export class ProjectController {
       if (gemini) configs.push(gemini);
       if (azure) configs.push(azure);
     } else {
-      // Padrão: Gemini primeiro (quota gratuita disponível), depois OpenAI, depois Azure
+      // PadrÃ£o: Gemini primeiro (quota gratuita disponÃ­vel), depois OpenAI, depois Azure
       if (gemini) configs.push(gemini);
       if (openai) configs.push(openai);
       if (azure) configs.push(azure);
@@ -174,7 +174,7 @@ export class ProjectController {
   private getVisionConfig(): VisionConfig | null {
     const alive = this.getVisionConfigs().filter((c) => !this.deadProviders.has(c.apiUrl));
     if (!alive.length) {
-      console.warn('[AI Reader] Nenhum provedor Vision disponível (sem chave ou todos sem quota).');
+      console.warn('[AI Reader] Nenhum provedor Vision disponÃ­vel (sem chave ou todos sem quota).');
       return null;
     }
     return alive[0];
@@ -217,7 +217,7 @@ export class ProjectController {
     if (azureKey && azureEndpoint) {
       const cleanEndpoint = azureEndpoint.trim();
 
-      // Se for a URL do Azure AI Studio/Foundry com gateway compatível com OpenAI
+      // Se for a URL do Azure AI Studio/Foundry com gateway compatÃ­vel com OpenAI
       if (cleanEndpoint.includes('services.ai.azure.com') || cleanEndpoint.includes('/openai/v1')) {
         let apiUrl = cleanEndpoint;
         if (apiUrl.endsWith('/responses')) {
@@ -238,7 +238,7 @@ export class ProjectController {
         };
       }
 
-      // Caso clássico da Azure OpenAI
+      // Caso clÃ¡ssico da Azure OpenAI
       const cleanClassic = cleanEndpoint.endsWith('/') ? cleanEndpoint.slice(0, -1) : cleanEndpoint;
       const classicDeployment = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4o';
       return {
@@ -255,19 +255,19 @@ export class ProjectController {
   }
 
   private buildSystemPrompt(): string {
-    return `Você é um Orçamentista Sênior e Especialista em Projetos Executivos de Marcenaria Sob Medida e Móveis Planejados.
+    return `VocÃª Ã© um OrÃ§amentista SÃªnior e Especialista em Projetos Executivos de Marcenaria Sob Medida e MÃ³veis Planejados.
 
-Sua função é analisar a prancha do projeto executivo e extrair EXCLUSIVAMENTE os MÓVEIS MONTADOS (Módulos Inteiros / Estruturas Principais) com suas MEDIDAS BRUTAS EXTERNAS TOTAIS.
+Sua funÃ§Ã£o Ã© analisar a prancha do projeto executivo e extrair EXCLUSIVAMENTE os MÃ“VEIS MONTADOS (MÃ³dulos Inteiros / Estruturas Principais) com suas MEDIDAS BRUTAS EXTERNAS TOTAIS.
 
-═══════════════════════════════════════════════════════════════════
-REGRA CRÍTICA DE EXTRAÇÃO PARA MARCENARIA (MÓVEIS MONTADOS)
-═══════════════════════════════════════════════════════════════════
-1. NÃO EXTRAIA SUB-PEÇAS FRACIONADAS: NÃO extraia frentes de portas de giro/correr/basculantes, NÃO extraia caixas de gavetas ou gavetões, NÃO extraia prateleiras internas, divisórias, fundos, puxadores, corrediças, dobradiças ou fitas de LED como itens separados.
-2. EXTRAIA APENAS MÓVEIS MONTADOS INTEIROS (MÓDULOS PRINCIPAIS): Identifique cada móvel ou bancada como um volume completo como se estivesse montado no ambiente.
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+REGRA CRÃTICA DE EXTRAÃ‡ÃƒO PARA MARCENARIA (MÃ“VEIS MONTADOS)
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+1. NÃƒO EXTRAIA SUB-PEÃ‡AS FRACIONADAS: NÃƒO extraia frentes de portas de giro/correr/basculantes, NÃƒO extraia caixas de gavetas ou gavetÃµes, NÃƒO extraia prateleiras internas, divisÃ³rias, fundos, puxadores, corrediÃ§as, dobradiÃ§as ou fitas de LED como itens separados.
+2. EXTRAIA APENAS MÃ“VEIS MONTADOS INTEIROS (MÃ“DULOS PRINCIPAIS): Identifique cada mÃ³vel ou bancada como um volume completo como se estivesse montado no ambiente.
 
-Exemplos de Móveis Montados Inteiros:
-- Balcão de Base / Balcão da Pia (ex: L 2400 x A 720 x P 560 mm)
-- Armário Aéreo Superior (ex: L 1274 x A 600 x P 350 mm)
+Exemplos de MÃ³veis Montados Inteiros:
+- BalcÃ£o de Base / BalcÃ£o da Pia (ex: L 2400 x A 720 x P 560 mm)
+- ArmÃ¡rio AÃ©reo Superior (ex: L 1274 x A 600 x P 350 mm)
 - Torre Quente / Torre de Eletros (ex: L 600 x A 2596 x P 600 mm)
 - Bancada / Ilha Cooktop (ex: L 1859 x A 920 x P 620 mm)
 - Guarda-Roupa / Roupeiro (ex: L 2970 x A 2430 x P 570 mm)
@@ -289,55 +289,57 @@ REGRA ESPECIAL PARA COZINHAS EM PLANTA BAIXA/COTADA:
 - Para balcoes inferiores e ilhas, use largura do trecho, altura de bancada cotada (ex: Alt. 92 cm = 920 mm) e profundidade cotada na planta/corte. Cooktop, cuba e eletros sao apenas referencias de vao/uso.
 - Se uma dimensao faltar em um movel visivel, mantenha null nessa dimensao e explique a pendencia em observacoes; nao descarte o movel inteiro se ele existe claramente no render/planta.
 
-═══════════════════════════════════════════════════════════════════
-REGRAS DE MEDIDAS E COTAS (OBRIGATÓRIAS)
-═══════════════════════════════════════════════════════════════════
-1. CONVERSÃO CM -> MM: As cotas dos desenhos estão em CENTÍMETROS (cm). Multiplique OBRIGATORIAMENTE por 10 para converter em MILÍMETROS (mm).
-   - Cota "127,4" cm ➔ 1274 mm
-   - Cota "185,9" cm ➔ 1859 mm
-   - Cota "62,0" cm ➔ 620 mm
-   - Cota "259,6" cm ➔ 2596 mm
-   - Cota "40,0" cm ➔ 400 mm
-   - Cota "82,0" cm ➔ 820 mm
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+REGRAS DE MEDIDAS E COTAS (OBRIGATÃ“RIAS)
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+1. CONVERSÃƒO CM -> MM: As cotas dos desenhos estÃ£o em CENTÃMETROS (cm). Multiplique OBRIGATORIAMENTE por 10 para converter em MILÃMETROS (mm).
+   - Cota "127,4" cm âž” 1274 mm
+   - Cota "185,9" cm âž” 1859 mm
+   - Cota "62,0" cm âž” 620 mm
+   - Cota "259,6" cm âž” 2596 mm
+   - Cota "40,0" cm âž” 400 mm
+   - Cota "82,0" cm âž” 820 mm
 
 2. EIXOS DIMENSIONAIS:
-   - width (largura L): dimensão horizontal na vista frontal ou elevação.
-   - height (altura A): dimensão vertical na vista frontal ou elevação.
+   - width (largura L): dimensÃ£o horizontal na vista frontal ou elevaÃ§Ã£o.
+   - height (altura A): dimensÃ£o vertical na vista frontal ou elevaÃ§Ã£o.
    - depth (profundidade P): profundidade externa frente/fundo lida no corte, planta ou 3D.
+   - Em Planta Baixa (vista superior), as dimensões desenhadas são Largura e Profundidade. A Altura costuma vir escrita em texto (ex: "Alt. 250cm").
+   - Cuidado com a sigla "Susp." (Suspenso): refere-se à distâcia do chão, não à altura do móvel.
 
 3. MATERIAIS E CORES:
-   - Extraia o material/cor indicado na observação ou legenda (ex: "MDF Gianduia Trama (Duratex)", "MDF Freijó", "Quartzo Branco").
+   - Extraia o material/cor indicado na observaÃ§Ã£o ou legenda (ex: "MDF Gianduia Trama (Duratex)", "MDF FreijÃ³", "Quartzo Branco").
 
-4. NÃO DUPLIQUE MÓVEIS:
-   - Um móvel desenhado em planta, vista frontal e 3D deve ser contabilizado apenas UMA VEZ.
+4. NÃƒO DUPLIQUE MÃ“VEIS:
+   - Um mÃ³vel desenhado em planta, vista frontal e 3D deve ser contabilizado apenas UMA VEZ.
 
-═══════════════════════════════════════════════════════════════════
-REGRA DE CONFIABILIDADE (CRÍTICA — NUNCA VIOLE)
-═══════════════════════════════════════════════════════════════════
-- Se uma dimensão (width, height ou depth) NÃO está cotada/escrita no desenho, retorne null para essa dimensão.
-- NUNCA invente, estime ou "adivinhe" medidas. Retorne APENAS o que está EXPLÍCITO no documento.
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+REGRA DE CONFIABILIDADE (CRÃTICA â€” NUNCA VIOLE)
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+- Se uma dimensÃ£o (width, height ou depth) NÃƒO estÃ¡ cotada/escrita no desenho, retorne null para essa dimensÃ£o.
+- NUNCA invente, estime ou "adivinhe" medidas. Retorne APENAS o que estÃ¡ EXPLÃCITO no documento.
 - Para imagens 3D / renders / perspectivas SEM cotas numericas: retorne os moveis planejados visiveis com width/height/depth null e observacoes claras. Eles sao pendencias visuais, nao medidas de orcamento.
-- A confiabilidade do orçamento depende 100% de medidas reais dos documentos.
+- A confiabilidade do orÃ§amento depende 100% de medidas reais dos documentos.
 
-═══════════════════════════════════════════════════════════════════
-MÚLTIPLOS DOCUMENTOS DO MESMO PROJETO
-═══════════════════════════════════════════════════════════════════
-- O projeto pode conter vários documentos: pranchas executivas com cotas, renders 3D, fotos de referência.
-- Cada folha/imagem será enviada individualmente. Extraia o que for possível de cada uma.
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+MÃšLTIPLOS DOCUMENTOS DO MESMO PROJETO
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+- O projeto pode conter vÃ¡rios documentos: pranchas executivas com cotas, renders 3D, fotos de referÃªncia.
+- Cada folha/imagem serÃ¡ enviada individualmente. Extraia o que for possÃ­vel de cada uma.
 - Se uma folha e um render 3D/foto sem cotas, extraia os moveis planejados visiveis como itens visuais com dimensoes null, para reconciliar com as pranchas cotadas do mesmo projeto.
-- Se uma folha é uma prancha executiva com cotas, extraia as medidas reais.
-- O sistema consolidará as informações de todos os documentos automaticamente.
+- Se uma folha Ã© uma prancha executiva com cotas, extraia as medidas reais.
+- O sistema consolidarÃ¡ as informaÃ§Ãµes de todos os documentos automaticamente.
 
-═══════════════════════════════════════════════════════════════════
-FORMATO DE SAÍDA (JSON PURO)
-═══════════════════════════════════════════════════════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+FORMATO DE SAÃDA (JSON PURO)
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 Retorne SOMENTE um objeto JSON puro no formato:
 {
   "items": [
     {
-      "environment": "Cozinha|Suíte|Banheiro|Dormitório|Sala",
-      "itemType": "Balcão|Aéreo|Torre|Bancada|Guarda-Roupa|Painel|Cama|Mesa|Penteadeira",
-      "description": "Nome legível do móvel montado (ex: Armário Aéreo sobre Pia com 3 portas)",
+      "environment": "Cozinha|SuÃ­te|Banheiro|DormitÃ³rio|Sala",
+      "itemType": "BalcÃ£o|AÃ©reo|Torre|Bancada|Guarda-Roupa|Painel|Cama|Mesa|Penteadeira",
+      "description": "Nome legÃ­vel do mÃ³vel montado (ex: ArmÃ¡rio AÃ©reo sobre Pia com 3 portas)",
       "codigo": "A|B|C|1|2|vazio",
       "width": 1274,
       "height": 600,
@@ -347,18 +349,18 @@ Retorne SOMENTE um objeto JSON puro no formato:
       "materialType": "MDF Gianduia Trama (Duratex)",
       "cor": "Gianduia Trama",
       "acabamento": "Texturizado",
-      "observacoes": "Móvel aéreo montado conforme prancha.",
+      "observacoes": "MÃ³vel aÃ©reo montado conforme prancha.",
       "classificacao": "explicita",
       "confianca": 98
     }
   ]
 }
 
-Nota: Se a dimensão não está cotada, use null:
+Nota: Se a dimensÃ£o nÃ£o estÃ¡ cotada, use null:
   "width": null,
   "height": null,
   "depth": null,
-  "observacoes": "Medidas ausentes — verificar prancha executiva com cotas",
+  "observacoes": "Medidas ausentes â€” verificar prancha executiva com cotas",
   "classificacao": "visual",
   "confianca": 30`;
   }
@@ -462,23 +464,23 @@ Nota: Se a dimensão não está cotada, use null:
     if (cfg.model) requestBody.model = cfg.model;
 
     if (isNewModel) {
-      // Modelos de reasoning (gpt-5/o1/o3) consomem tokens em raciocínio ANTES da
-      // resposta — sem folga o JSON sai truncado/vazio (finish_reason=length).
+      // Modelos de reasoning (gpt-5/o1/o3) consomem tokens em raciocÃ­nio ANTES da
+      // resposta â€” sem folga o JSON sai truncado/vazio (finish_reason=length).
       requestBody.max_completion_tokens = maxTokens + 8000;
-      // reasoning_effort low: corta a latência de ~3min para segundos por folha
-      // sem comprometer a leitura de cotas (a extração é visual, não lógica-profunda)
+      // reasoning_effort low: corta a latÃªncia de ~3min para segundos por folha
+      // sem comprometer a leitura de cotas (a extraÃ§Ã£o Ã© visual, nÃ£o lÃ³gica-profunda)
       requestBody.reasoning_effort = process.env.VISION_REASONING_EFFORT || 'low';
       // json_object FUNCIONA no gpt-5 via chat/completions (validado); o problema
-      // antigo era só no endpoint /responses. Garante JSON válido (twin quebrava sem isso).
+      // antigo era sÃ³ no endpoint /responses. Garante JSON vÃ¡lido (twin quebrava sem isso).
       requestBody.response_format = { type: 'json_object' };
-      // Sem temperature: modelos de reasoning não aceitam valor customizado
+      // Sem temperature: modelos de reasoning nÃ£o aceitam valor customizado
     } else {
       requestBody.max_tokens = maxTokens;
       requestBody.temperature = 0;
       requestBody.response_format = { type: 'json_object' };
     }
 
-    // Provedor já marcado como morto nesta sessão → troca antes mesmo de tentar
+    // Provedor jÃ¡ marcado como morto nesta sessÃ£o â†’ troca antes mesmo de tentar
     if (this.deadProviders.has(cfg.apiUrl)) {
       const alive = this.getVisionConfig();
       if (!alive) return null;
@@ -487,7 +489,7 @@ Nota: Se a dimensão não está cotada, use null:
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 180000); // 180s (3 minutos) para modelos de visão pesados
+      const timeoutId = setTimeout(() => controller.abort(), 180000); // 180s (3 minutos) para modelos de visÃ£o pesados
 
       const response = await fetch(cfg.apiUrl, {
         method: 'POST',
@@ -496,42 +498,42 @@ Nota: Se a dimensão não está cotada, use null:
         signal: controller.signal,
       }).finally(() => clearTimeout(timeoutId));
 
-      // 429/503: diferenciar quota ESGOTADA (permanente) de rate limit temporário
+      // 429/503: diferenciar quota ESGOTADA (permanente) de rate limit temporÃ¡rio
       if (response.status === 429 || response.status === 503) {
         const errBody = await response.text();
 
-        // Quota esgotada ou credencial inválida → FAILOVER imediato para o próximo provedor
+        // Quota esgotada ou credencial invÃ¡lida â†’ FAILOVER imediato para o prÃ³ximo provedor
         if (/insufficient_quota|billing|account is not active/i.test(errBody)) {
           this.deadProviders.add(cfg.apiUrl);
           const next = this.getVisionConfig();
           if (next && next.apiUrl !== cfg.apiUrl) {
-            console.warn(`[AI Reader] ${cfg.name || 'provedor'} SEM QUOTA — failover para ${next.name || 'alternativo'}.`);
+            console.warn(`[AI Reader] ${cfg.name || 'provedor'} SEM QUOTA â€” failover para ${next.name || 'alternativo'}.`);
             return this.callVision(next, messages, maxTokens, 0);
           }
           console.error('[AI Reader] Quota esgotada e nenhum provedor alternativo configurado.');
           return null;
         }
 
-        // Rate limit temporário → retry com backoff exponencial
+        // Rate limit temporÃ¡rio â†’ retry com backoff exponencial
         if (attempt < 5) {
           const retryAfter = Number(response.headers.get('retry-after'));
           const waitMs = retryAfter > 0
             ? retryAfter * 1000
             : Math.min(3000 * Math.pow(2, attempt), 30000);
-          console.warn(`[AI Reader] ${response.status} rate limit (${cfg.name}) — retry em ${waitMs}ms (tentativa ${attempt + 1}/5)`);
+          console.warn(`[AI Reader] ${response.status} rate limit (${cfg.name}) â€” retry em ${waitMs}ms (tentativa ${attempt + 1}/5)`);
           await new Promise((r) => setTimeout(r, waitMs));
           return this.callVision(cfg, messages, maxTokens, attempt + 1);
         }
-        console.error('[AI Reader] Rate limit persistente após 5 tentativas:', errBody.substring(0, 200));
+        console.error('[AI Reader] Rate limit persistente apÃ³s 5 tentativas:', errBody.substring(0, 200));
         return null;
       }
 
-      // 401/403: credencial inválida → failover
+      // 401/403: credencial invÃ¡lida â†’ failover
       if (response.status === 401 || response.status === 403) {
         this.deadProviders.add(cfg.apiUrl);
         const next = this.getVisionConfig();
         if (next && next.apiUrl !== cfg.apiUrl) {
-          console.warn(`[AI Reader] ${cfg.name || 'provedor'} credencial inválida (${response.status}) — failover para ${next.name}.`);
+          console.warn(`[AI Reader] ${cfg.name || 'provedor'} credencial invÃ¡lida (${response.status}) â€” failover para ${next.name}.`);
           return this.callVision(next, messages, maxTokens, 0);
         }
         return null;
@@ -627,20 +629,20 @@ Nota: Se a dimensão não está cotada, use null:
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  //  CAMADA 1 — LOCAL PADDLEOCR MICROSERVICE (OCR + PyMuPDF)
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  //  CAMADA 1 â€” LOCAL PADDLEOCR MICROSERVICE (OCR + PyMuPDF)
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  /** Verifica se o OCR local está habilitado. */
+  /** Verifica se o OCR local estÃ¡ habilitado. */
   private getLocalOcrUrl(): string | null {
     return process.env.LOCAL_OCR_ENDPOINT || 'http://localhost:8000/analyze';
   }
 
   /**
-   * Envia PDF/imagem ao microserviço local PaddleOCR e retorna,
-   * por página (índice 0-based), um contexto estruturado (texto OCR +
-   * cotas numéricas com posição). Retorna [] se o serviço estiver offline
-   * em caso de falha — o pipeline então segue só com a imagem (fallback silencioso).
+   * Envia PDF/imagem ao microserviÃ§o local PaddleOCR e retorna,
+   * por pÃ¡gina (Ã­ndice 0-based), um contexto estruturado (texto OCR +
+   * cotas numÃ©ricas com posiÃ§Ã£o). Retorna [] se o serviÃ§o estiver offline
+   * em caso de falha â€” o pipeline entÃ£o segue sÃ³ com a imagem (fallback silencioso).
    */
   private async analyzeLayout(fileBuffer: Buffer, contentType: string = 'application/pdf'): Promise<string[]> {
     const ocrUrl = this.getLocalOcrUrl();
@@ -669,21 +671,21 @@ Nota: Se a dimensão não está cotada, use null:
 
       const data = await submit.json();
       if (data.status !== 'completed') {
-        console.warn('[PaddleOCR] análise falhou.', data.status);
+        console.warn('[PaddleOCR] anÃ¡lise falhou.', data.status);
         return [];
       }
 
-      // O backend Python já devolve `contexts` populado corretamente
+      // O backend Python jÃ¡ devolve `contexts` populado corretamente
       const contexts = data.contexts || [];
-      console.log(`[PaddleOCR] contexto estruturado de ${contexts.length} página(s).`);
+      console.log(`[PaddleOCR] contexto estruturado de ${contexts.length} pÃ¡gina(s).`);
       return contexts;
     } catch (err) {
-      console.warn('[PaddleOCR] erro de conexão com o microserviço local (verifique se está rodando):', err);
+      console.warn('[PaddleOCR] erro de conexÃ£o com o microserviÃ§o local (verifique se estÃ¡ rodando):', err);
       return [];
     }
   }
 
-  /** Monta o contexto estruturado por página a partir do analyzeResult. */
+  /** Monta o contexto estruturado por pÃ¡gina a partir do analyzeResult. */
   private buildPageContexts(result: any): string[] {
     const pages: any[] = result.pages || [];
     const tables: any[] = result.tables || [];
@@ -696,7 +698,7 @@ Nota: Se a dimensão não está cotada, use null:
 
       const lines: string[] = (page.lines || []).map((l: any) => l.content).filter(Boolean);
 
-      // Cotas numéricas (1-4 dígitos) com posição normalizada 0-1 na folha
+      // Cotas numÃ©ricas (1-4 dÃ­gitos) com posiÃ§Ã£o normalizada 0-1 na folha
       const cotas: string[] = [];
       (page.words || []).forEach((w: any) => {
         const t = String(w.content || '').trim();
@@ -715,7 +717,7 @@ Nota: Se a dimensão não está cotada, use null:
       const parts: string[] = [];
       if (lines.length) parts.push(`TEXTO OCR:\n${lines.join(' | ').slice(0, 3500)}`);
       if (tablesMd) parts.push(`TABELAS/MEMORIAIS:\n${tablesMd.slice(0, 2500)}`);
-      if (cotas.length) parts.push(`COTAS (valor@posição x,y normalizada 0-1):\n${cotas.slice(0, 90).join('; ')}`);
+      if (cotas.length) parts.push(`COTAS (valor@posiÃ§Ã£o x,y normalizada 0-1):\n${cotas.slice(0, 90).join('; ')}`);
       contexts[idx] = parts.join('\n\n');
     });
     return contexts;
@@ -735,9 +737,9 @@ Nota: Se a dimensão não está cotada, use null:
     return grid.map((r) => '| ' + r.join(' | ') + ' |').join('\n');
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  //  CAMADA 2 — GPT-4o VISION (raciocínio geométrico + cruzamento com Camada 1)
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  //  CAMADA 2 â€” GPT-4o VISION (raciocÃ­nio geomÃ©trico + cruzamento com Camada 1)
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /** Analyze a single sheet image and return its extracted items. */
   private async analyzePage(
@@ -762,12 +764,13 @@ Nota: Se a dimensão não está cotada, use null:
       userContent.push({
         type: 'text',
         text:
-          `\n\nDADOS ESTRUTURADOS DESTA FOLHA (extraídos por OCR/layout do Azure Document Intelligence). ` +
-          `Use estes VALORES como fonte da verdade para as cotas exatas e cruze-os com a imagem para associar cada cota ao movel correto ` +
-          `(pela proximidade das posições x,y). Ainda assim aplique a regra cm→mm (×10). ` +
-          `Se uma medida nao tiver cota correspondente, use null ou omita o item; nunca registre medida estimada. ` +
+          `\n\nDADOS ESTRUTURADOS DESTA FOLHA (extraÃ­dos por OCR/layout do Azure Document Intelligence). ` +
+          `O OCR pode cometer erros ou omitir textos verticais/pequenos. Se você ler uma cota claramente na imagem, CONFIE NA SUA VISÃO, mesmo que ela não apareça no OCR. Use o OCR apenas como guia espacial ` +
+          `(pela proximidade das posiÃ§Ãµes x,y). Ainda assim aplique a regra cmâ†’mm (Ã—10). ` +
+          `Se uma medida NÃO estiver escrita no desenho, use null; nunca registre medida estimada da sua cabeça. ` +
           `Para evitar JSON longo/truncado, priorize no maximo 12 MOVEIS MONTADOS desta folha e ignore subpecas. ` +
-          `Nao use as palavras "assumida", "estimada" ou "aproximada": cada width/height/depth precisa vir de cota visivel ou texto OCR.\n\n${structuredContext}`,
+          
+ao use as palavras "assumida", "estimada" ou "aproximada": cada width/height/depth precisa vir de cota visivel ou texto OCR.\n\n${structuredContext}`,
       });
     }
 
@@ -847,12 +850,12 @@ Nota: Se a dimensão não está cotada, use null:
     return results;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   //  NORMALIZATION
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
-   * Clean raw model items: coerce numbers, drop empty rows, and — crucially —
+   * Clean raw model items: coerce numbers, drop empty rows, and â€” crucially â€”
    * replace any 0 primary dimension with the panel thickness so the 3D engine
    * renders a real board instead of a flat plane.
    */
@@ -903,7 +906,7 @@ Nota: Se a dimensão não está cotada, use null:
       const d = num(raw.depth);
       const t = num(raw.thickness) || 18;
 
-      // NÃO inventar dimensões! Manter 0 se a IA não encontrou cotas no documento.
+      // NÃƒO inventar dimensÃµes! Manter 0 se a IA nÃ£o encontrou cotas no documento.
       const width = Math.round(w);
       const height = Math.round(h);
       const depth = Math.round(d);
@@ -912,19 +915,19 @@ Nota: Se a dimensão não está cotada, use null:
 
       const visualOnly = width === 0 && height === 0 && depth === 0;
 
-      // Métricas derivadas (só calcula se tiver dimensões reais)
+      // MÃ©tricas derivadas (sÃ³ calcula se tiver dimensÃµes reais)
       const hasRealDims = width > 0 && height > 0;
       const area = hasRealDims ? +(((width * height) / 1_000_000) * quantity).toFixed(3) : 0;
       const volume = hasRealDims ? +(((width * height * thickness) / 1_000_000_000) * quantity).toFixed(4) : 0;
 
-      // Adicionar aviso se dimensões estão ausentes
+      // Adicionar aviso se dimensÃµes estÃ£o ausentes
       const missingDims = [w === 0 && 'largura', h === 0 && 'altura', d === 0 && 'profundidade'].filter(Boolean);
       let obs = raw.observacoes ? String(raw.observacoes).substring(0, 400) : '';
       if (visualOnly && !/visual|render|sem cota|sem medida|pendencia/i.test(obs)) {
         obs = obs ? `${obs} | Identificado visualmente - sem cotas nesta imagem.` : 'Identificado visualmente - sem cotas nesta imagem.';
       }
       if (missingDims.length > 0) {
-        const warning = `⚠ Medidas não cotadas no documento (${missingDims.join(', ')}). Verificar prancha executiva.`;
+        const warning = `âš  Medidas nÃ£o cotadas no documento (${missingDims.join(', ')}). Verificar prancha executiva.`;
         obs = obs ? `${obs} | ${warning}` : warning;
       }
 
@@ -953,11 +956,11 @@ Nota: Se a dimensão não está cotada, use null:
   }
 
   /**
-   * Funde peças idênticas (mesmo ambiente + tipo + material + dimensões ~iguais)
-   * somando a quantidade. Corrige a super-contagem: a mesma peça aparece em várias
-   * vistas da folha e o modelo às vezes a lista repetida → aqui vira 1 item com qty.
+   * Funde peÃ§as idÃªnticas (mesmo ambiente + tipo + material + dimensÃµes ~iguais)
+   * somando a quantidade. Corrige a super-contagem: a mesma peÃ§a aparece em vÃ¡rias
+   * vistas da folha e o modelo Ã s vezes a lista repetida â†’ aqui vira 1 item com qty.
    */
-  /** Normaliza texto p/ chave: minúsculas, sem acentos, espaços colapsados. */
+  /** Normaliza texto p/ chave: minÃºsculas, sem acentos, espaÃ§os colapsados. */
   private normKey(s: string): string {
     return (s || '')
       .normalize('NFD')
@@ -968,14 +971,14 @@ Nota: Se a dimensão não está cotada, use null:
   }
 
   private dedupeItems(items: any[]): any[] {
-    // Canoniza nomes de ambiente: "AREA INTIMA" e "Área Íntima" viram o mesmo
+    // Canoniza nomes de ambiente: "AREA INTIMA" e "Ãrea Ãntima" viram o mesmo
     // (vence a primeira grafia com acentos/caixa mista encontrada)
     const envCanon = new Map<string, string>();
     for (const it of items) {
       const k = this.normKey(it.environment);
       const cur = envCanon.get(k);
       const cand = String(it.environment || 'Ambiente').trim();
-      if (!cur || (/[a-zà-ÿ]/.test(cand) && !/[a-zà-ÿ]/.test(cur))) envCanon.set(k, cand);
+      if (!cur || (/[a-zÃ -Ã¿]/.test(cand) && !/[a-zÃ -Ã¿]/.test(cur))) envCanon.set(k, cand);
     }
     for (const it of items) it.environment = envCanon.get(this.normKey(it.environment)) || it.environment;
 
@@ -985,7 +988,7 @@ Nota: Se a dimensão não está cotada, use null:
         this.normKey(it.environment),
         (it.itemType || '').toLowerCase().trim(),
         (it.materialType || '').toLowerCase().trim(),
-        Math.round((it.width || 0) / 10),   // tolerância de 1cm
+        Math.round((it.width || 0) / 10),   // tolerÃ¢ncia de 1cm
         Math.round((it.height || 0) / 10),
         Math.round((it.depth || 0) / 10),
         (it.width || 0) + (it.height || 0) + (it.depth || 0) === 0 ? this.normKey(it.description) : '',
@@ -1001,7 +1004,7 @@ Nota: Se a dimensão não está cotada, use null:
         map.set(key, { ...it });
       }
     }
-    // Recalcula área/volume com a quantidade consolidada
+    // Recalcula Ã¡rea/volume com a quantidade consolidada
     const out = Array.from(map.values());
     for (const m of out) {
       m.area = +(((m.width * m.height) / 1_000_000) * m.quantity).toFixed(3);
@@ -1010,65 +1013,65 @@ Nota: Se a dimensão não está cotada, use null:
     return out;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  //  FASE SEMÂNTICA — DIGITAL TWIN (Ambiente → Móveis → Componentes → Ferragens)
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  //  FASE SEMÃ‚NTICA â€” DIGITAL TWIN (Ambiente â†’ MÃ³veis â†’ Componentes â†’ Ferragens)
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  /** System prompt do montador semântico: transforma peças planas em um modelo paramétrico. */
+  /** System prompt do montador semÃ¢ntico: transforma peÃ§as planas em um modelo paramÃ©trico. */
   private buildTwinPrompt(): string {
-    return `Você é um Engenheiro CAD/BIM Paramétrico Sênior, especialista em reconstrução 3D de marcenaria sob medida a partir de projetos executivos em PDF.
+    return `VocÃª Ã© um Engenheiro CAD/BIM ParamÃ©trico SÃªnior, especialista em reconstruÃ§Ã£o 3D de marcenaria sob medida a partir de projetos executivos em PDF.
 
-Sua responsabilidade não é produzir uma representação aproximada ou conceitual. Você deve criar um DIGITAL TWIN geometricamente fiel, detalhado e auditável de cada móvel apresentado no projeto.
+Sua responsabilidade nÃ£o Ã© produzir uma representaÃ§Ã£o aproximada ou conceitual. VocÃª deve criar um DIGITAL TWIN geometricamente fiel, detalhado e auditÃ¡vel de cada mÃ³vel apresentado no projeto.
 
-O resultado será renderizado diretamente no Three.js 0.185 (WebGL, materiais PBR, sombras, visualização paramétrica, vistas explodidas, abertura de portas/gavetas e cortes).
+O resultado serÃ¡ renderizado diretamente no Three.js 0.185 (WebGL, materiais PBR, sombras, visualizaÃ§Ã£o paramÃ©trica, vistas explodidas, abertura de portas/gavetas e cortes).
 
 ENTRADA:
-Você recebe a LISTA DE PEÇAS individuais extraídas das pranchas do projeto executivo, agrupadas por ambiente.
+VocÃª recebe a LISTA DE PEÃ‡AS individuais extraÃ­das das pranchas do projeto executivo, agrupadas por ambiente.
 
-SUA MISSÃO:
-Reconstrua SEMANTICAMENTE o projeto como um MODELO PARAMÉTRICO ("Digital Twin"), agrupando as peças em MÓVEIS coesos e detalhando os COMPONENTES tridimensionais de cada móvel.
+SUA MISSÃƒO:
+Reconstrua SEMANTICAMENTE o projeto como um MODELO PARAMÃ‰TRICO ("Digital Twin"), agrupando as peÃ§as em MÃ“VEIS coesos e detalhando os COMPONENTES tridimensionais de cada mÃ³vel.
 
-É proibido substituir um móvel detalhado por uma caixa genérica, placa lisa, retângulo sem detalhes ou textura simulada. Detalhes como cantos arredondados, negativos, ripados, frisos, rebaixos, cubas esculpidas, molduras, nichos e avanços Z devem existir como geometria real nos componentes do Digital Twin.
+Ã‰ proibido substituir um mÃ³vel detalhado por uma caixa genÃ©rica, placa lisa, retÃ¢ngulo sem detalhes ou textura simulada. Detalhes como cantos arredondados, negativos, ripados, frisos, rebaixos, cubas esculpidas, molduras, nichos e avanÃ§os Z devem existir como geometria real nos componentes do Digital Twin.
 
-═══════════════════════════════════════════════════════════════════
-REGRA DE NÃO SIMPLIFICAÇÃO E MODELAGEM DE PROFUNDIDADE (Z-DEPTH)
-═══════════════════════════════════════════════════════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+REGRA DE NÃƒO SIMPLIFICAÃ‡ÃƒO E MODELAGEM DE PROFUNDIDADE (Z-DEPTH)
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 1. Cada detalhe desenhado, cotado ou descrito deve aparecer no modelo 3D como um componente separado, mesmo que fino (0.5cm ou 1cm).
-2. Modele relevos, avanços e recuos no eixo Z (profundidade). Exemplo: painel base no fundo (Z recuado), molduras/bordas avançando em Z, negativos/frisos entre painéis com recuo real. Isso produz sombras de contato e leitura volumétrica real.
-3. Não use apenas texturas para substituir ripados, frisos largos, puxadores cava/chanfro ou mudanças de profundidade. Modele-os.
-4. Para cantos curvos/arredondados, descreva os raios de curvatura e o formato geométrico nas notas.
+2. Modele relevos, avanÃ§os e recuos no eixo Z (profundidade). Exemplo: painel base no fundo (Z recuado), molduras/bordas avanÃ§ando em Z, negativos/frisos entre painÃ©is com recuo real. Isso produz sombras de contato e leitura volumÃ©trica real.
+3. NÃ£o use apenas texturas para substituir ripados, frisos largos, puxadores cava/chanfro ou mudanÃ§as de profundidade. Modele-os.
+4. Para cantos curvos/arredondados, descreva os raios de curvatura e o formato geomÃ©trico nas notas.
 
-═══════════════════════════════════════════════════════════════════
-DECOMPOSIÇÃO E POSICIONAMENTO 3D (X, Y, Z em mm)
-═══════════════════════════════════════════════════════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+DECOMPOSIÃ‡ÃƒO E POSICIONAMENTO 3D (X, Y, Z em mm)
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-1. Determine a posição absoluta de cada móvel no ambiente (x, y, z em mm):
-   - y = 0 é o chão da sala/banheiro.
+1. Determine a posiÃ§Ã£o absoluta de cada mÃ³vel no ambiente (x, y, z em mm):
+   - y = 0 Ã© o chÃ£o da sala/banheiro.
    - Bancadas de pedra/marcenaria com cuba/pia devem ser posicionadas com y entre 800 e 850 mm (altura de uso).
-   - Móveis aéreos devem ser posicionados suspensos (ex.: y = 1500 mm).
+   - MÃ³veis aÃ©reos devem ser posicionados suspensos (ex.: y = 1500 mm).
    - Camas devem ser posicionadas com base em y = 0, estendendo-se no eixo Z para frente.
-   - Cabeceiras e painéis decorativos devem ser posicionados rentes à parede traseira (z = 0 ou z próximo a 0).
-   - Criados-mudos devem ser posicionados nas laterais da cama (ajustando a coordenada x em relação ao centro da cama).
-2. Cada componente do móvel deve ter dimensões (width, height, depth, thickness em mm) e posição local relativa ao móvel pai.
-3. Classifique componentes móveis com pivô e rotação corretos:
+   - Cabeceiras e painÃ©is decorativos devem ser posicionados rentes Ã  parede traseira (z = 0 ou z prÃ³ximo a 0).
+   - Criados-mudos devem ser posicionados nas laterais da cama (ajustando a coordenada x em relaÃ§Ã£o ao centro da cama).
+2. Cada componente do mÃ³vel deve ter dimensÃµes (width, height, depth, thickness em mm) e posiÃ§Ã£o local relativa ao mÃ³vel pai.
+3. Classifique componentes mÃ³veis com pivÃ´ e rotaÃ§Ã£o corretos:
    - porta: defina opening (giro_esquerda, giro_direita, basculante, tombar, correr).
    - gaveta / gavetao: defina eixo de abertura (z).
-4. Infira ferragens obrigatórias por componente: porta de giro -> dobradica; porta de correr -> trilho/roldana; gaveta -> corredica; gaveta/porta -> puxador (perfil, fecho_toque, cava).
+4. Infira ferragens obrigatÃ³rias por componente: porta de giro -> dobradica; porta de correr -> trilho/roldana; gaveta -> corredica; gaveta/porta -> puxador (perfil, fecho_toque, cava).
 
-═══════════════════════════════════════════════════════════════════
-FORMATO DE SAÍDA (JSON PURO)
-═══════════════════════════════════════════════════════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+FORMATO DE SAÃDA (JSON PURO)
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 Retorne SOMENTE um objeto JSON puro (sem markdown, sem crases, sem texto fora do JSON) no formato:
 {
   "environments": [
     {
-      "name": "string — nome do ambiente",
+      "name": "string â€” nome do ambiente",
       "furnitures": [
         {
           "id": "slug_unico_do_movel (ex: suite_master_guarda_roupa_01)",
-          "name": "Nome descritivo e fiel do móvel (ex: Armário Inferior da Pia)",
+          "name": "Nome descritivo e fiel do mÃ³vel (ex: ArmÃ¡rio Inferior da Pia)",
           "type": "guarda_roupa|armario_inferior|aereo|estante|painel|cama|bancada|cabeceira|nicho|mesa|balcao",
           "dimensions": {
             "width": 0,
@@ -1095,20 +1098,20 @@ Retorne SOMENTE um objeto JSON puro (sem markdown, sem crases, sem texto fora do
               "height": 0,
               "depth": 0,
               "qty": 1,
-              "material": "material específico do componente (ou vazio)",
+              "material": "material especÃ­fico do componente (ou vazio)",
               "hardware": ["dobradica", "corredica", "puxador_perfil", "trilho_correr", "suporte_invisivel"],
               "position_local": { "x": 0, "y": 0, "z": 0 },
-              "notes": "detalhes geométricos: cantos arredondados, raios, rebaixos, espessuras finas"
+              "notes": "detalhes geomÃ©tricos: cantos arredondados, raios, rebaixos, espessuras finas"
             }
           ],
-          "notes": "observações gerais de construção do móvel e montagem"
+          "notes": "observaÃ§Ãµes gerais de construÃ§Ã£o do mÃ³vel e montagem"
         }
       ]
     }
   ],
   "audit": {
     "warnings": [
-      "lista de pendências, cotas ausentes ou inconsistências de auditoria"
+      "lista de pendÃªncias, cotas ausentes ou inconsistÃªncias de auditoria"
     ],
     "stats": {
       "environments": 0,
@@ -1118,12 +1121,12 @@ Retorne SOMENTE um objeto JSON puro (sem markdown, sem crases, sem texto fora do
   }
 }
 
-Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique a geometria. Se um móvel possui múltiplos materiais ou camadas em Z, modele como componentes independentes detalhados.`;
+Use milÃ­metros para TODAS as dimensÃµes e coordenadas X, Y, Z. NÃ£o simplifique a geometria. Se um mÃ³vel possui mÃºltiplos materiais ou camadas em Z, modele como componentes independentes detalhados.`;
   }
 
   /**
    * Parse tolerante de JSON vindo do LLM: remove cercas de markdown, extrai o bloco
-   * {…} mais externo e tenta reparos comuns (vírgulas penduradas, truncamento).
+   * {â€¦} mais externo e tenta reparos comuns (vÃ­rgulas penduradas, truncamento).
    */
   private tryParseJsonLoose(content: string): any | null {
     let clean = content.trim();
@@ -1133,23 +1136,23 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
     clean = clean.trim();
 
     const attempts: string[] = [clean];
-    // Bloco { … } mais externo (descarta texto antes/depois)
+    // Bloco { â€¦ } mais externo (descarta texto antes/depois)
     const first = clean.indexOf('{');
     const last = clean.lastIndexOf('}');
     if (first >= 0 && last > first) attempts.push(clean.slice(first, last + 1));
-    // Reparo: vírgulas penduradas antes de } ou ]
+    // Reparo: vÃ­rgulas penduradas antes de } ou ]
     attempts.push(...attempts.map((a) => a.replace(/,\s*([}\]])/g, '$1')));
 
     for (const a of attempts) {
-      try { return JSON.parse(a); } catch { /* tenta o próximo */ }
+      try { return JSON.parse(a); } catch { /* tenta o prÃ³ximo */ }
     }
     return null;
   }
 
   /**
    * Monta o Digital Twin POR AMBIENTE (chamadas menores em paralelo) e agrega.
-   * Gerar o projeto inteiro numa única chamada truncava a saída (25k+ tokens)
-   * e cortava ambientes — por ambiente o payload e a resposta ficam pequenos.
+   * Gerar o projeto inteiro numa Ãºnica chamada truncava a saÃ­da (25k+ tokens)
+   * e cortava ambientes â€” por ambiente o payload e a resposta ficam pequenos.
    */
   private async assembleDigitalTwin(cfg: VisionConfig, itemsByEnv: Record<string, any[]>): Promise<any | null> {
     const envNames = Object.keys(itemsByEnv);
@@ -1163,8 +1166,8 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
           {
             role: 'user',
             content:
-              `PEÇAS EXTRAÍDAS do ambiente "${envName}":\n${payload.slice(0, 60000)}\n\nReconstrua o Digital Twin paramétrico SOMENTE deste ambiente (environments terá 1 elemento).` +
-              (attempt > 0 ? '\n\nATENÇÃO: a tentativa anterior retornou JSON INVÁLIDO. Retorne SOMENTE JSON estritamente válido.' : ''),
+              `PEÃ‡AS EXTRAÃDAS do ambiente "${envName}":\n${payload.slice(0, 60000)}\n\nReconstrua o Digital Twin paramÃ©trico SOMENTE deste ambiente (environments terÃ¡ 1 elemento).` +
+              (attempt > 0 ? '\n\nATENÃ‡ÃƒO: a tentativa anterior retornou JSON INVÃLIDO. Retorne SOMENTE JSON estritamente vÃ¡lido.' : ''),
           },
         ];
         const content = await this.callVision(cfg, messages, 10000);
@@ -1172,10 +1175,10 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
         const parsed = this.tryParseJsonLoose(content);
         const env = parsed?.environments?.[0];
         if (env && Array.isArray(env.furnitures)) {
-          console.log(`[Twin] ${envName}: ${env.furnitures.length} móvel(is).`);
+          console.log(`[Twin] ${envName}: ${env.furnitures.length} mÃ³vel(is).`);
           return { env, warnings: parsed?.audit?.warnings || [] };
         }
-        console.warn(`[Twin] JSON inválido p/ ambiente "${envName}" (tentativa ${attempt + 1}/2).`);
+        console.warn(`[Twin] JSON invÃ¡lido p/ ambiente "${envName}" (tentativa ${attempt + 1}/2).`);
       }
       return null;
     };
@@ -1186,21 +1189,21 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
 
     const warnings = results.filter(Boolean).flatMap((r: any) => r.warnings);
     const missing = envNames.filter((_, i) => !results[i]);
-    if (missing.length) warnings.push(`Ambientes não reconstruídos: ${missing.join(', ')}`);
+    if (missing.length) warnings.push(`Ambientes nÃ£o reconstruÃ­dos: ${missing.join(', ')}`);
 
     const furns = environments.reduce((s: number, e: any) => s + (e.furnitures?.length || 0), 0);
     const comps = environments.reduce(
       (s: number, e: any) => s + (e.furnitures || []).reduce((t: number, f: any) => t + (f.components?.length || 0), 0),
       0,
     );
-    console.log(`[Twin] Digital Twin montado: ${environments.length}/${envNames.length} ambiente(s), ${furns} móvel(is), ${comps} comp.`);
+    console.log(`[Twin] Digital Twin montado: ${environments.length}/${envNames.length} ambiente(s), ${furns} mÃ³vel(is), ${comps} comp.`);
     return {
       environments,
       audit: { warnings, stats: { environments: environments.length, furnitures: furns, components: comps } },
     };
   }
 
-  /** Reconstrói só o Digital Twin a partir dos itens já salvos (sem reprocessar o PDF). */
+  /** ReconstrÃ³i sÃ³ o Digital Twin a partir dos itens jÃ¡ salvos (sem reprocessar o PDF). */
   @Post(':id/twin')
   async rebuildTwin(@Headers('authorization') authHeader: string, @Param('id') id: string) {
     const tenantId = this.verifyTokenAndGetTenantId(authHeader);
@@ -1209,10 +1212,10 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
       include: { items: true },
     });
     if (!project) throw new HttpException('Project not found', HttpStatus.NOT_FOUND);
-    if (!project.items.length) throw new HttpException('Projeto sem peças extraídas', HttpStatus.UNPROCESSABLE_ENTITY);
+    if (!project.items.length) throw new HttpException('Projeto sem peÃ§as extraÃ­das', HttpStatus.UNPROCESSABLE_ENTITY);
 
     const cfg = this.getVisionConfig();
-    if (!cfg) throw new HttpException('Motor de IA não configurado', HttpStatus.SERVICE_UNAVAILABLE);
+    if (!cfg) throw new HttpException('Motor de IA nÃ£o configurado', HttpStatus.SERVICE_UNAVAILABLE);
 
     const byEnv: Record<string, any[]> = {};
     for (const it of project.items) {
@@ -1270,9 +1273,9 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
     return { success: true, engineering };
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   //  PARSE ENDPOINT
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   @Post(':id/review-pdf')
   async reviewProjectPdf(
@@ -1455,7 +1458,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
   ) {
     const tenantId = this.verifyTokenAndGetTenantId(authHeader);
 
-    // Suporta batch (array de files) e single-file (retrocompatível)
+    // Suporta batch (array de files) e single-file (retrocompatÃ­vel)
     let files: { filename: string; fileBase64: string; mimeType: string }[] = [];
     if (Array.isArray(body.files) && body.files.length > 0) {
       files = body.files;
@@ -1494,15 +1497,15 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
     // Wipe previous extraction UMA VEZ antes de processar o batch inteiro.
     await this.prisma.projectItem.deleteMany({ where: { projectId: id } });
 
-    // Executa a análise pesada em BACKGROUND — agora processando TODOS os arquivos do batch.
+    // Executa a anÃ¡lise pesada em BACKGROUND â€” agora processando TODOS os arquivos do batch.
     this.runParseJobBatch(id, project, files, storedDocuments).catch((e) =>
-      console.error('[Parse Job] erro não tratado:', e),
+      console.error('[Parse Job] erro nÃ£o tratado:', e),
     );
 
     return { success: true, started: true, parseStatus: 'EXTRACTING', filesCount: files.length };
   }
 
-  /** Job pesado de análise — processa TODOS os arquivos do batch em sequência, consolidando itens. */
+  /** Job pesado de anÃ¡lise â€” processa TODOS os arquivos do batch em sequÃªncia, consolidando itens. */
   private async runParseJobBatch(
     id: string,
     project: any,
@@ -1518,12 +1521,12 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
     try {
       const cfg = this.getVisionConfig();
       if (!cfg) {
-        throw new Error('Motor de IA (OpenAI/Azure) não configurado no servidor.');
+        throw new Error('Motor de IA (OpenAI/Azure) nÃ£o configurado no servidor.');
       }
 
       console.log(`[AI Reader] Iniciando batch com ${files.length} arquivo(s).`);
 
-      // Processa cada arquivo do batch, acumulando TODOS os itens extraídos
+      // Processa cada arquivo do batch, acumulando TODOS os itens extraÃ­dos
       for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
         const file = files[fileIdx];
         const fname = file.filename || `documento-${fileIdx + 1}`;
@@ -1531,7 +1534,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
         console.log(`[AI Reader] Processando arquivo ${fileIdx + 1}/${files.length}: ${fname}`);
 
         if (!file.fileBase64 || !file.mimeType) {
-          console.warn(`[AI Reader] Arquivo ${fname} sem dados — pulando.`);
+          console.warn(`[AI Reader] Arquivo ${fname} sem dados â€” pulando.`);
           continue;
         }
 
@@ -1591,7 +1594,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
           data: { parseStatus: 'INTERPRETING', parseProgress: progressBase + 5 },
         });
 
-        // CAMADA 2: Vision AI — analisa cada folha
+        // CAMADA 2: Vision AI â€” analisa cada folha
         let rawItems: any[] = [];
         if (pageImages.length > 0) {
           const totalPagesAllFiles = pageImages.length;
@@ -1601,7 +1604,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
             async (img, idx) => {
               let items = await this.analyzePage(cfg, img, idx, totalPagesAllFiles, pageContexts[idx]);
               if (items.length === 0) {
-                console.warn(`[AI Reader] ${fname} folha ${idx + 1} vazia — retry de completude.`);
+                console.warn(`[AI Reader] ${fname} folha ${idx + 1} vazia â€” retry de completude.`);
                 items = await this.analyzePage(cfg, img, idx, totalPagesAllFiles, pageContexts[idx]);
               }
               return items;
@@ -1617,7 +1620,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
             { role: 'system', content: this.buildSystemPrompt() },
             {
               role: 'user',
-              content: `Analise este projeto executivo de marcenaria a partir do texto extraído e extraia TODAS as peças de TODOS os ambientes.\n\nTexto:\n${extractedText.substring(0, 14000)}`,
+              content: `Analise este projeto executivo de marcenaria a partir do texto extraÃ­do e extraia TODAS as peÃ§as de TODOS os ambientes.\n\nTexto:\n${extractedText.substring(0, 14000)}`,
             },
           ];
           rawItems = this.extractItemsFromContent(await this.callVision(cfg, messages, 8192)).map((item) => ({
@@ -1628,7 +1631,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
           }));
         }
 
-        console.log(`[AI Reader] ${fname}: ${rawItems.length} raw item(s) extraídos.`);
+        console.log(`[AI Reader] ${fname}: ${rawItems.length} raw item(s) extraÃ­dos.`);
         allRawItems = allRawItems.concat(rawItems);
       }
 
@@ -1639,7 +1642,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
       const quoteReadyItems = deduplicated.filter((item) => item.width > 0 && item.height > 0 && item.depth > 0);
       isRealParsing = deduplicated.length > 0;
       console.log(`[Interpretation] ${interpretation.summary.furnitureItems} movel(is), ${interpretation.summary.readyToQuote} pronto(s), ${interpretation.summary.pendingMeasurements} pendente(s), status=${interpretation.validation.status}.`);
-      console.log(`[AI Reader] Batch consolidado: ${allRawItems.length} raw → ${sanitized.length} sanitized → ${deduplicated.length} deduplicated → ${quoteReadyItems.length} quote-ready item(s).`);
+      console.log(`[AI Reader] Batch consolidado: ${allRawItems.length} raw â†’ ${sanitized.length} sanitized â†’ ${deduplicated.length} deduplicated â†’ ${quoteReadyItems.length} quote-ready item(s).`);
 
       // Persist the extracted pieces.
       await this.prisma.project.update({
@@ -1674,11 +1677,11 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
 
       const uniqueEnvironments = Array.from(new Set(items.map((i) => i.environment)));
 
-      if (!parseError && items.length === 0) {
-        parseError = 'Nenhum movel com medidas completas foi extraido. Verifique se a prancha cotada esta legivel e reprocesse.';
+      if (!parseError && items.length === 0 && deduplicated.length === 0) {
+        parseError = 'Nenhum movel extraido. Verifique se as imagens contem ambientes ou mÃ³veis validos.';
       }
 
-      // FASE SEMÂNTICA: Digital Twin
+      // FASE SEMÃ‚NTICA: Digital Twin
       let digitalTwin: any = null;
       if (!parseError && items.length > 0 && process.env.ENABLE_DIGITAL_TWIN === 'true') {
         try {
@@ -1723,7 +1726,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
             data: {
               leadId: project.leadId,
               type: 'SYSTEM',
-              content: `${isRealParsing ? 'GPT-4o Vision AI' : 'Analisador'} processou ${files.length} documento(s) "${batchLabel}": ${uniqueEnvironments.length} ambiente(s) (${uniqueEnvironments.join(', ')}), ${items.length} móveis montados.`,
+              content: `${isRealParsing ? 'GPT-4o Vision AI' : 'Analisador'} processou ${files.length} documento(s) "${batchLabel}": ${uniqueEnvironments.length} ambiente(s) (${uniqueEnvironments.join(', ')}), ${items.length} mÃ³veis montados.`,
               author: isRealParsing ? 'GPT-4o Vision AI Reader' : 'Analisador de Projetos',
             },
           });
@@ -1732,7 +1735,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
 
       console.log(`[AI Reader] BATCH DONE: ${items.length} items from ${files.length} file(s), real=${isRealParsing}, envs=${uniqueEnvironments.join(', ')}`);
     } catch (err: any) {
-      parseError = err?.message || 'Falha na análise dos documentos.';
+      parseError = err?.message || 'Falha na anÃ¡lise dos documentos.';
       console.error('[AI Reader] Batch parse error:', err);
       await this.prisma.project.update({
         where: { id },
