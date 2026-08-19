@@ -469,6 +469,32 @@ Nota: Se a dimensÃƒÂ£o nÃƒÂ£o estÃƒÂ¡ cotada, use null:
     return sameEnvironment && Boolean(leftText && rightText) && (leftText.includes(rightText) || rightText.includes(leftText));
   }
 
+  /**
+   * A profundidade costuma estar no corte/vista lateral imediatamente anterior
+   * ou posterior à vista frontal. Revisar somente a página onde o móvel foi
+   * identificado impede a segunda leitura de encontrar a terceira dimensão.
+   */
+  private reviewPageIndexes(targets: any[], pageCount: number): number[] {
+    const pages = new Set<number>();
+    for (const target of targets) {
+      const page = Number(target?.evidence?.sourcePage);
+      if (!Number.isInteger(page) || page < 1) continue;
+      for (const candidate of [page - 1, page, page + 1]) {
+        if (candidate >= 1 && candidate <= pageCount) pages.add(candidate - 1);
+      }
+    }
+    return pages.size ? Array.from(pages).sort((a, b) => a - b) : Array.from({ length: pageCount }, (_, index) => index);
+  }
+
+  /** Limit the prompt to targets whose source is on this sheet or a neighbour. */
+  private reviewTargetsForPage(targets: any[], pageNumber: number): any[] {
+    const nearby = targets.filter((target) => {
+      const sourcePage = Number(target?.evidence?.sourcePage);
+      return Number.isInteger(sourcePage) && Math.abs(sourcePage - pageNumber) <= 1;
+    });
+    return nearby.length ? nearby : targets;
+  }
+
   private async callVision(
     cfg: VisionConfig,
     messages: any[],
@@ -1526,9 +1552,6 @@ Use milÃƒÂ­metros para TODAS as dimensÃƒÂµes e coordenadas X, Y, Z. NÃ�
       if (!cfg) throw new Error('Motor de IA (DeepSeek/OpenAI/Gemini/Azure) nao configurado no servidor.');
 
       const reviewItems: any[] = [];
-      const targetPages = new Set<number>(targets
-        .map((item) => Number(item.evidence?.sourcePage))
-        .filter((page) => Number.isInteger(page) && page > 0));
       const sourceFiles: ProjectSourceFile[] = [];
       const directory = this.projectUploadDirectory(id);
 
@@ -1554,13 +1577,18 @@ Use milÃƒÂ­metros para TODAS as dimensÃƒÂµes e coordenadas X, Y, Z. NÃ�
           hasStructuredContext: contexts.some((context) => Boolean(context && context.length > 20)),
         });
 
-        const candidatePages = targetPages.size
-          ? pageImages.map((_, index) => index).filter((index) => targetPages.has(index + 1))
-          : pageImages.map((_, index) => index);
-        const pagesToReview = candidatePages.length ? candidatePages : pageImages.map((_, index) => index);
-        const fromDocument = await this.runPool(pagesToReview, 1, async (pageIndex) =>
-          this.analyzeTargetedReviewPage(cfg, pageImages[pageIndex], pageIndex, pageImages.length, targets, contexts[pageIndex]),
-        );
+        const pagesToReview = this.reviewPageIndexes(targets, pageImages.length);
+        const fromDocument = await this.runPool(pagesToReview, 1, async (pageIndex) => {
+          const pageTargets = this.reviewTargetsForPage(targets, pageIndex + 1);
+          return this.analyzeTargetedReviewPage(
+            cfg,
+            pageImages[pageIndex],
+            pageIndex,
+            pageImages.length,
+            pageTargets,
+            contexts[pageIndex],
+          );
+        });
         reviewItems.push(...fromDocument.flat());
         await this.prisma.project.update({
           where: { id },

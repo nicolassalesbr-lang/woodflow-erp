@@ -306,15 +306,55 @@ export default function Projects() {
   const [viewStyle, setViewStyle] = useState<string>("textured");
   const [doorOpenAngle, setDoorOpenAngle] = useState<number>(0);
   const [viewMode, setViewMode] = useState<'raw' | 'all'>('raw');
+  const [reviewingPdf, setReviewingPdf] = useState(false);
 
   const canvasNestingRef = useRef<HTMLCanvasElement>(null);
 
   const selectedItems = selectedProj?.items || [];
+
+  // PDF candidates with incomplete measurements live in the interpretation
+  // audit, not in project.items (which remains quote-ready only). Keep them
+  // visible for review without letting them contaminate costing/nesting.
+  const pendingInterpretationItems = useMemo(() => {
+    const interpretation = selectedProj?.digitalTwin?.interpretation;
+    if (!Array.isArray(interpretation?.environments)) return [];
+    return interpretation.environments.flatMap((environment: any) =>
+      (environment.items || [])
+        .filter((item: any) => item.quoteStatus !== 'READY')
+        .map((item: any) => ({
+          id: `pending-${item.id}`,
+          environment: item.environment || environment.name || 'Ambiente',
+          itemType: item.itemType || 'Móvel',
+          description: item.description || item.itemType || 'Móvel pendente',
+          codigo: item.codigo || null,
+          width: item.dimensions?.width || 0,
+          height: item.dimensions?.height || 0,
+          depth: item.dimensions?.depth || 0,
+          thickness: item.dimensions?.thickness || 18,
+          quantity: item.quantity || 1,
+          materialType: item.materialType || 'Não confirmado',
+          cor: item.color || null,
+          acabamento: item.finish || null,
+          observacoes: item.reviewBrief?.objectives?.join(' ') || item.evidence?.notes || 'Requer conferência técnica.',
+          area: 0,
+          volume: 0,
+          quoteStatus: item.quoteStatus,
+          reviewBrief: item.reviewBrief,
+          validation: item.validation,
+          isPendingInterpretation: true,
+        })),
+    );
+  }, [selectedProj]);
+
+  const detailItems = useMemo(
+    () => [...selectedItems, ...pendingInterpretationItems],
+    [selectedItems, pendingInterpretationItems],
+  );
   
   const environments = useMemo(() => {
-    const names = selectedItems.map((item: any) => item.environment);
+    const names = detailItems.map((item: any) => item.environment);
     return Array.from(new Set(names)) as string[];
-  }, [selectedItems]);
+  }, [detailItems]);
 
   const fetchProjects = async () => {
     try {
@@ -430,6 +470,31 @@ export default function Projects() {
       } catch {
         /* rede instável — continua tentando */
       }
+    }
+  };
+
+  const reviewPdf = async (projectId: string) => {
+    setReviewingPdf(true);
+    setParseStage('Revisando vistas e cortes...');
+    try {
+      const response = await fetch(`${getApiUrl()}/api/projects/${projectId}/review-pdf`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer mock-jwt-token-2026' },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.message || 'Não foi possível iniciar a revisão.');
+      if (data?.started === false) {
+        alert(data?.message || 'Não há pendências para revisar.');
+        await fetchProjects();
+        return;
+      }
+      await pollParseStatus(projectId);
+      await fetchProjects();
+    } catch (error: any) {
+      alert(error?.message || 'Falha ao revisar o PDF.');
+    } finally {
+      setReviewingPdf(false);
+      setParseStage('');
     }
   };
 
@@ -1904,6 +1969,17 @@ export default function Projects() {
                       onChange={(event) => handleFileChange(event, selectedProj.id)}
                     />
                   </label>
+                  {selectedProj.originalFileUrl && pendingInterpretationItems.length > 0 && (
+                    <button
+                      type="button"
+                      disabled={reviewingPdf || uploading}
+                      onClick={() => reviewPdf(selectedProj.id)}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#e8d4b8]/18 bg-[#211811] px-4 py-3 text-sm font-bold text-[#ead5ba] transition hover:border-[#d6ad79]/35 disabled:cursor-not-allowed disabled:opacity-55"
+                    >
+                      <RotateCw className={`h-4 w-4 ${reviewingPdf ? 'animate-spin' : ''}`} />
+                      {reviewingPdf ? (parseStage || 'Revisando PDF...') : 'Revisar PDF'}
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1944,16 +2020,23 @@ export default function Projects() {
               {/* Selected Project Stats (Always visible in all tabs) */}
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <ProjectStat label="Ambientes" value={environments.length || 0} />
-                <ProjectStat label="Itens planejados" value={selectedItems.length || 0} />
+                <ProjectStat label="Itens identificados" value={detailItems.length || 0} />
                 <ProjectStat
                   label="Qtd. total"
-                  value={selectedItems.reduce((sum: number, item: any) => sum + item.quantity, 0)}
+                  value={detailItems.reduce((sum: number, item: any) => sum + item.quantity, 0)}
                 />
               </div>
 
               {/* TAB 1: DETAILS */}
               {activeTab === "details" && (
                 <div className="space-y-5">
+                  {pendingInterpretationItems.length > 0 && (
+                    <div className="rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+                      <strong>{pendingInterpretationItems.length} móveis foram identificados no PDF.</strong>{' '}
+                      Eles aparecem abaixo, mas continuam fora do orçamento até que todas as medidas sejam confirmadas.
+                      {selectedItems.length > 0 ? ` ${selectedItems.length} já estão prontos para cálculo.` : ''}
+                    </div>
+                  )}
                   {/* Resumo de produção */}
                   {selectedItems.length > 0 && (
                     <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -1999,15 +2082,15 @@ export default function Projects() {
                                 : "text-[#bba890] hover:text-[#ead5ba]"
                             }`}
                           >
-                            📋 Todas as Peças ({selectedItems.length})
+                            📋 Todas as Peças ({detailItems.length})
                           </button>
                         </div>
                       </div>
 
-                      {selectedItems.length ? (
+                      {detailItems.length ? (
                         <div className="space-y-6">
                           {environments.map((env) => {
-                            let envItems = selectedItems.filter((i: any) => i.environment === env);
+                            let envItems = detailItems.filter((i: any) => i.environment === env);
                             if (viewMode === 'raw') {
                               const rawOnly = envItems.filter(isMainFurnitureModule);
                               if (rawOnly.length > 0) envItems = rawOnly;
@@ -2108,7 +2191,7 @@ export default function Projects() {
                   </div>
 
                   {/* Resumo Simplificado de Cotas & Módulos (Colapsado por padrão ao final da página) */}
-                  <SimplifiedSummaryTable items={selectedItems} />
+                  <SimplifiedSummaryTable items={detailItems} />
                 </div>
               )}
 
@@ -2633,6 +2716,7 @@ function MiniStat({ label, value }: { label: string; value: any }) {
 function ItemDetailCard({ item }: { item: any }) {
   const [expanded, setExpanded] = useState(false);
   const hasMeasures = item.width > 0 || item.height > 0 || item.depth > 0;
+  const dimension = (value: number) => value > 0 ? value : 'pendente';
 
   return (
     <div 
@@ -2655,15 +2739,20 @@ function ItemDetailCard({ item }: { item: any }) {
               {item.quantity}×
             </span>
           ) : null}
+          {item.isPendingInterpretation ? (
+            <span className="shrink-0 rounded bg-amber-400/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-300">
+              medidas pendentes
+            </span>
+          ) : null}
         </div>
 
         {/* Compact Dimensions L (mm) | A (mm) | P (mm) */}
         {hasMeasures && (
           <div className="flex items-center gap-3 shrink-0">
             <div className="flex items-center gap-2.5 bg-[#211811]/80 px-3 py-1.5 rounded-lg border border-[#e8d4b8]/10 text-xs font-mono text-[#e8d9c6]">
-              <span><span className="text-[#a99680] text-[10px]">L:</span> <strong className="text-white">{item.width}</strong></span>
-              <span><span className="text-[#a99680] text-[10px]">A:</span> <strong className="text-white">{item.height}</strong></span>
-              <span><span className="text-[#a99680] text-[10px]">P:</span> <strong className="text-white">{item.depth}</strong></span>
+              <span><span className="text-[#a99680] text-[10px]">L:</span> <strong className="text-white">{dimension(item.width)}</strong></span>
+              <span><span className="text-[#a99680] text-[10px]">A:</span> <strong className="text-white">{dimension(item.height)}</strong></span>
+              <span><span className="text-[#a99680] text-[10px]">P:</span> <strong className="text-white">{dimension(item.depth)}</strong></span>
               <span className="text-[9px] text-[#8c7c68]">mm</span>
             </div>
             <span className="text-xs text-[#a99680] font-bold">
