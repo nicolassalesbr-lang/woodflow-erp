@@ -149,20 +149,28 @@ export class ProjectController {
    */
   private getVisionConfigs(): VisionConfig[] {
     const configs: VisionConfig[] = [];
+    const deepseek = this.buildDeepSeekConfig();
     const gemini = this.buildGeminiConfig();
     const openai = this.buildOpenAIConfig();
     const azure = this.buildAzureConfig();
     const preferred = (process.env.VISION_PROVIDER || '').toLowerCase();
-    if (preferred === 'azure') {
+    if (preferred === 'deepseek') {
+      if (deepseek) configs.push(deepseek);
+      if (gemini) configs.push(gemini);
+      if (openai) configs.push(openai);
       if (azure) configs.push(azure);
+    } else if (preferred === 'azure') {
+      if (azure) configs.push(azure);
+      if (deepseek) configs.push(deepseek);
       if (gemini) configs.push(gemini);
       if (openai) configs.push(openai);
     } else if (preferred === 'openai') {
       if (openai) configs.push(openai);
+      if (deepseek) configs.push(deepseek);
       if (gemini) configs.push(gemini);
       if (azure) configs.push(azure);
     } else {
-      // Padrão: Gemini primeiro (quota gratuita disponível), depois OpenAI, depois Azure
+      if (deepseek) configs.push(deepseek);
       if (gemini) configs.push(gemini);
       if (openai) configs.push(openai);
       if (azure) configs.push(azure);
@@ -178,6 +186,21 @@ export class ProjectController {
       return null;
     }
     return alive[0];
+  }
+
+  private buildDeepSeekConfig(): VisionConfig | null {
+    const rawKey = process.env.DEEPSEEK_API_KEY;
+    if (!rawKey) return null;
+    const standardKey = rawKey.trim().replace(/^[\"']|[\"']$/g, '');
+    return {
+      apiUrl: 'https://api.deepseek.com/chat/completions',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${standardKey}`,
+      },
+      model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+      name: 'DeepSeek',
+    };
   }
 
   private buildOpenAIConfig(): VisionConfig | null {
@@ -1324,7 +1347,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
   ): Promise<void> {
     try {
       const cfg = this.getVisionConfig();
-      if (!cfg) throw new Error('Motor de IA (OpenAI/Azure) nao configurado no servidor.');
+      if (!cfg) throw new Error('Motor de IA (DeepSeek/OpenAI/Gemini/Azure) nao configurado no servidor.');
 
       const reviewItems: any[] = [];
       const targetPages = new Set<number>(targets
@@ -1520,7 +1543,7 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
     try {
       const cfg = this.getVisionConfig();
       if (!cfg) {
-        throw new Error('Motor de IA (OpenAI/Azure) não configurado no servidor.');
+        throw new Error('Motor de IA (DeepSeek/OpenAI/Gemini/Azure) não configurado no servidor.');
       }
 
       console.log(`[AI Reader] Iniciando batch com ${files.length} arquivo(s).`);
