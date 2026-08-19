@@ -63,12 +63,12 @@ def preprocess_image(image_input: Union[str, np.ndarray], deskew: bool = True) -
 
 
 def build_image_ocr_variants(image_input: Union[str, np.ndarray]) -> list[tuple[str, np.ndarray]]:
-    """Create OCR inputs tailored to technical drawings uploaded as images.
+    """Create OCR inputs tailored to technical drawings and rendered PDFs.
 
     Architectural screenshots frequently use red dimension strings and arrows.  A
     greyscale pass weakens that signal, so keep the regular pass and add a second
-    image where only red annotations remain.  This is intentionally used only by
-    image uploads; PDF processing keeps its existing pipeline unchanged.
+    image where only red annotations remain. Both variants deliberately share
+    the same canvas size so their bounding boxes use the same coordinate system.
     """
     if isinstance(image_input, str):
         image = cv2.imread(image_input)
@@ -97,6 +97,8 @@ def build_image_ocr_variants(image_input: Union[str, np.ndarray]) -> list[tuple[
     if cv2.countNonZero(red_mask) > 100:
         red_only = np.full(image.shape[:2], 255, dtype=np.uint8)
         red_only[red_mask > 0] = 0
-        variants.append(("red_dimensions", cv2.cvtColor(red_only, cv2.COLOR_GRAY2BGR)))
+        red_bgr = cv2.cvtColor(red_only, cv2.COLOR_GRAY2BGR)
+        red_bgr = cv2.resize(red_bgr, (full.shape[1], full.shape[0]), interpolation=cv2.INTER_NEAREST)
+        variants.append(("red_dimensions", red_bgr))
 
     return variants

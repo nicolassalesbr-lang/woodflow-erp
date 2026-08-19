@@ -1,5 +1,7 @@
 import os
 import shutil
+import re
+import tempfile
 import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from pydantic import BaseModel
@@ -34,6 +36,55 @@ class OCRResponse(BaseModel):
     items: List[ExtractedItem]
     status: str
 
+
+def _looks_like_measurement(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text.lower())
+    return bool(re.search(r"\d", compact)) and bool(re.fullmatch(
+        r"(?:[lap]=?)?[øφ]?[+-]?\d{1,5}(?:[.,]\d{1,3})?(?:mm|cm|m)?(?:x\d{1,5}(?:[.,]\d{1,3})?(?:mm|cm|m)?){0,2}",
+        compact,
+    ))
+
+
+def _dedupe_items(items: list[dict]) -> list[dict]:
+    """Merge native/Paddle repetitions while retaining the best evidence."""
+    best: dict[str, dict] = {}
+    for item in items:
+        box = item["bounding_box"]
+        text_key = re.sub(r"\s+", "", item["text"].lower())
+        cx = round((box["x1"] + box["x2"]) / 48)
+        cy = round((box["y1"] + box["y2"]) / 48)
+        key = f'{item["page"]}:{text_key}:{cx}:{cy}'
+        previous = best.get(key)
+        if previous is None or item["confidence"] > previous["confidence"]:
+            best[key] = item
+    return list(best.values())
+
+
+def _page_context(native_blocks: list[dict], ocr_items: list[dict], width: float, height: float) -> str:
+    native_text = [block["text"] for block in native_blocks]
+    ocr_text = [item["text"] for item in ocr_items if item.get("variant") == "full"]
+    dimensions = []
+    for item in ocr_items:
+        if not _looks_like_measurement(item["text"]):
+            continue
+        box = item["bounding_box"]
+        x = ((box["x1"] + box["x2"]) / 2) / max(width, 1)
+        y = ((box["y1"] + box["y2"]) / 2) / max(height, 1)
+        dimensions.append(
+            f'{item["text"]}@({x:.3f},{y:.3f});conf={item["confidence"]:.2f};'
+            f'rot={item.get("orientation", 0)};fonte={item.get("variant", "full")}'
+        )
+
+    # Dimension evidence comes first so dense title blocks cannot truncate it.
+    parts = []
+    if dimensions:
+        parts.append("COTAS OCR COM POSICAO/CONFIANCA:\n" + " | ".join(dimensions[:180]))
+    if native_text:
+        parts.append("TEXTO VETORIAL:\n" + " | ".join(native_text)[:5000])
+    if ocr_text:
+        parts.append("TEXTO OCR VISUAL:\n" + " | ".join(ocr_text)[:5000])
+    return "\n\n".join(parts)[:14000]
+
 @app.post("/analyze", response_model=OCRResponse)
 async def analyze_document(file: UploadFile = File(...)):
     """
@@ -42,9 +93,10 @@ async def analyze_document(file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file uploaded")
 
-    temp_dir = "./temp"
-    os.makedirs(temp_dir, exist_ok=True)
-    temp_path = os.path.join(temp_dir, file.filename)
+    suffix = os.path.splitext(file.filename)[1].lower()
+    temp_handle = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    temp_path = temp_handle.name
+    temp_handle.close()
     
     try:
         with open(temp_path, "wb") as buffer:
@@ -52,108 +104,50 @@ async def analyze_document(file: UploadFile = File(...)):
             
         from pipeline.extractor import extract_pdf_native
         from pipeline.paddle_runner import run_paddle_ocr
-        from pipeline.preprocess import preprocess_image, build_image_ocr_variants
+        from pipeline.preprocess import build_image_ocr_variants
         import cv2
         import numpy as np
         
         is_image = file.filename.lower().endswith(('.jpg', '.jpeg', '.png'))
         
-        if is_image:
-            pages_data = None
-        else:
-            # 1. Tentar extração nativa via PyMuPDF
-            pages_data = extract_pdf_native(temp_path)
-        
         contexts = []
         items_all = []
-        
-        if pages_data is not None:
-            # Texto extraído nativamente (PDF Vetorial)
-            for page in pages_data:
-                texts = [b["text"] for b in page["blocks"]]
-                cotas = []
-                w = page["width"]
-                h = page["height"]
-                for b in page["blocks"]:
-                    t = b["text"].strip()
-                    if any(char.isdigit() for char in t):
-                        box = b["bbox"] # (x0, y0, x1, y1)
-                        x_norm = ((box[0] + box[2]) / 2) / w
-                        y_norm = ((box[1] + box[3]) / 2) / h
-                        cotas.append(f"{t}@({x_norm:.2f},{y_norm:.2f})")
-                        
-                page_ctx = []
-                if texts: page_ctx.append(f"TEXTO OCR (NATIVO):\n{' | '.join(texts)[:3500]}")
-                if cotas: page_ctx.append(f"COTAS (valor@posição x,y normalizada 0-1):\n{'; '.join(cotas[:90])}")
-                contexts.append('\n\n'.join(page_ctx))
+
+        native_pages = None if is_image else extract_pdf_native(temp_path)
+        def process_page(page_index: int, image: np.ndarray) -> None:
+            variants = build_image_ocr_variants(image)
+            extracted_items = []
+            for variant_name, variant_image in variants:
+                extracted_items.extend(run_paddle_ocr(
+                    variant_image,
+                    page_num=page_index + 1,
+                    file_id=file.filename,
+                    variant=variant_name,
+                    orientations=(0, 90, 270),
+                ))
+            extracted_items = _dedupe_items(extracted_items)
+            items_all.extend(extracted_items)
+            native_blocks = native_pages[page_index]["blocks"] if native_pages else []
+            height, width = variants[0][1].shape[:2]
+            contexts.append(_page_context(native_blocks, extracted_items, width, height))
+
+        if is_image:
+            image = cv2.imread(temp_path)
+            if image is None:
+                raise ValueError(f"Could not read image: {temp_path}")
+            process_page(0, image)
         else:
-            # Falha na extração nativa ou é uma imagem, usar OCR
-            images_to_process = []
-            if is_image:
-                img_array = cv2.imread(temp_path)
-                if img_array is None:
-                    raise ValueError(f"Could not read image: {temp_path}")
-                images_to_process.append(img_array)
-            else:
-                import fitz
-                doc = fitz.open(temp_path)
-                for page_num in range(len(doc)):
-                    page = doc[page_num]
-                    pix = page.get_pixmap(dpi=300)
-                    
-                    # Converter pixmap para numpy array (OpenCV format BGR)
-                    img_array = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
-                    if pix.n == 4:
-                        img_array = cv2.cvtColor(img_array, cv2.COLOR_RGBA2BGR)
-                    elif pix.n == 1:
-                        img_array = cv2.cvtColor(img_array, cv2.COLOR_GRAY2BGR)
-                    elif pix.n == 3:
-                        img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-                    images_to_process.append(img_array)
-                doc.close()
-                
-            for page_num, img_array in enumerate(images_to_process):
-                # Image uploads get a dedicated red-annotation pass and 90-degree
-                # rotations. PDFs intentionally retain the existing OCR path.
-                if is_image:
-                    ocr_variants = build_image_ocr_variants(img_array)
-                    processed_img = ocr_variants[0][1]
-                    extracted_items = []
-                    for variant_name, variant_img in ocr_variants:
-                        extracted_items.extend(run_paddle_ocr(
-                            variant_img,
-                            page_num=page_num + 1,
-                            file_id=file.filename,
-                            variant=variant_name,
-                            orientations=(0, 90, 270),
-                        ))
-                else:
-                    processed_img = preprocess_image(img_array, deskew=True)
-                    extracted_items = run_paddle_ocr(processed_img, page_num=page_num+1, file_id=file.filename)
-                items_all.extend(extracted_items)
-                
-                # Montar contexto para a LLM
-                texts = [item["text"] for item in extracted_items]
-                red_texts = [item["text"] for item in extracted_items if item.get("variant") == "red_dimensions"]
-                cotas = []
-                
-                h_img, w_img = processed_img.shape[:2]
-                for item in extracted_items:
-                    t = item["text"].strip()
-                    if any(char.isdigit() for char in t):
-                        box = item["bounding_box"]
-                        x_norm = ((box["x1"] + box["x2"]) / 2) / w_img
-                        y_norm = ((box["y1"] + box["y2"]) / 2) / h_img
-                        cotas.append(f"{t}@({x_norm:.2f},{y_norm:.2f})")
-                        
-                page_ctx = []
-                if texts: page_ctx.append(f"TEXTO OCR:\n{' | '.join(texts)[:3500]}")
-                if red_texts:
-                    page_ctx.append(
-                        f"COTAS DESTACADAS EM VERMELHO (OCR dedicado):\n{' | '.join(red_texts)[:2000]}"
-                    )
-                if cotas: page_ctx.append(f"COTAS (valor@posição x,y normalizada 0-1):\n{'; '.join(cotas[:90])}")
-                contexts.append('\n\n'.join(page_ctx))
+            # Process one rendered page at a time. A 13-page A3 drawing at 300
+            # DPI can otherwise consume more than 1 GB before OCR even starts.
+            import fitz
+            document = fitz.open(temp_path)
+            try:
+                for page_index, page in enumerate(document):
+                    pix = page.get_pixmap(dpi=300, alpha=False)
+                    rgb = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
+                    process_page(page_index, cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+            finally:
+                document.close()
             
         return OCRResponse(
             pages=len(contexts),

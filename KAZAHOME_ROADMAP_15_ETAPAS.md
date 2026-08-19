@@ -106,6 +106,16 @@ Um móvel somente poderá receber `READY` quando as dimensões obrigatórias par
 - O prompt de cada página passou a receber somente os móveis daquela página e das páginas vizinhas, reduzindo associações incorretas.
 - Validação: TypeScript sem erros no frontend e no backend.
 
+#### 2026-08-19 — OCR híbrido obrigatório em PDFs técnicos
+
+- PDFs vetoriais agora passam simultaneamente por PyMuPDF e PaddleOCR; a presença de texto nativo não desativa mais o OCR visual.
+- Todas as folhas são renderizadas a 300 DPI e lidas nas orientações 0°, 90° e 270°.
+- Foi habilitada a variante dedicada às anotações vermelhas também para PDFs.
+- Cotas são priorizadas no contexto com posição normalizada, confiança, orientação e origem.
+- Corrigida a escala dos `bounding boxes` da variante vermelha.
+- As folhas são processadas sequencialmente para evitar consumo excessivo de memória em projetos A3 extensos.
+- Validação local: sintaxe Python e filtro de cotas aprovados; teste completo do PaddleOCR depende do runtime da VPS, onde estão os modelos e dependências.
+
 - [x] Auditar contratos atuais e identificar lacunas.
 - [x] Definir contrato-alvo e estados de evidência.
 - [ ] Criar tipos e schema de validação compartilhados.
