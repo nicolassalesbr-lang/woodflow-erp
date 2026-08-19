@@ -25,6 +25,8 @@ class ExtractedItem(BaseModel):
     page: int
     source_file_id: str
     extraction_method: str
+    variant: Optional[str] = None
+    orientation: Optional[int] = None
 
 class OCRResponse(BaseModel):
     pages: int
@@ -50,7 +52,7 @@ async def analyze_document(file: UploadFile = File(...)):
             
         from pipeline.extractor import extract_pdf_native
         from pipeline.paddle_runner import run_paddle_ocr
-        from pipeline.preprocess import preprocess_image
+        from pipeline.preprocess import preprocess_image, build_image_ocr_variants
         import cv2
         import numpy as np
         
@@ -111,15 +113,28 @@ async def analyze_document(file: UploadFile = File(...)):
                 doc.close()
                 
             for page_num, img_array in enumerate(images_to_process):
-                # Preprocessamento (OpenCV)
-                processed_img = preprocess_image(img_array, deskew=True)
-                
-                # OCR (PaddleOCR)
-                extracted_items = run_paddle_ocr(processed_img, page_num=page_num+1, file_id=file.filename)
+                # Image uploads get a dedicated red-annotation pass and 90-degree
+                # rotations. PDFs intentionally retain the existing OCR path.
+                if is_image:
+                    ocr_variants = build_image_ocr_variants(img_array)
+                    processed_img = ocr_variants[0][1]
+                    extracted_items = []
+                    for variant_name, variant_img in ocr_variants:
+                        extracted_items.extend(run_paddle_ocr(
+                            variant_img,
+                            page_num=page_num + 1,
+                            file_id=file.filename,
+                            variant=variant_name,
+                            orientations=(0, 90, 270),
+                        ))
+                else:
+                    processed_img = preprocess_image(img_array, deskew=True)
+                    extracted_items = run_paddle_ocr(processed_img, page_num=page_num+1, file_id=file.filename)
                 items_all.extend(extracted_items)
                 
                 # Montar contexto para a LLM
                 texts = [item["text"] for item in extracted_items]
+                red_texts = [item["text"] for item in extracted_items if item.get("variant") == "red_dimensions"]
                 cotas = []
                 
                 h_img, w_img = processed_img.shape[:2]
@@ -133,6 +148,10 @@ async def analyze_document(file: UploadFile = File(...)):
                         
                 page_ctx = []
                 if texts: page_ctx.append(f"TEXTO OCR:\n{' | '.join(texts)[:3500]}")
+                if red_texts:
+                    page_ctx.append(
+                        f"COTAS DESTACADAS EM VERMELHO (OCR dedicado):\n{' | '.join(red_texts)[:2000]}"
+                    )
                 if cotas: page_ctx.append(f"COTAS (valor@posição x,y normalizada 0-1):\n{'; '.join(cotas[:90])}")
                 contexts.append('\n\n'.join(page_ctx))
             

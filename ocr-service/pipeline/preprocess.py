@@ -60,3 +60,43 @@ def preprocess_image(image_input: Union[str, np.ndarray], deskew: bool = True) -
     processed_bgr = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
     
     return processed_bgr
+
+
+def build_image_ocr_variants(image_input: Union[str, np.ndarray]) -> list[tuple[str, np.ndarray]]:
+    """Create OCR inputs tailored to technical drawings uploaded as images.
+
+    Architectural screenshots frequently use red dimension strings and arrows.  A
+    greyscale pass weakens that signal, so keep the regular pass and add a second
+    image where only red annotations remain.  This is intentionally used only by
+    image uploads; PDF processing keeps its existing pipeline unchanged.
+    """
+    if isinstance(image_input, str):
+        image = cv2.imread(image_input)
+        if image is None:
+            raise ValueError(f"Could not read image from path: {image_input}")
+    elif isinstance(image_input, np.ndarray):
+        image = image_input.copy()
+    else:
+        raise TypeError("image_input must be a file path (str) or a numpy array.")
+
+    # Do not deskew screenshots/plants here: the previous full-canvas heuristic
+    # sees the white paper as foreground and can rotate valid drawings. The
+    # regular pass performs the shared 2x upscale, so the red mask below stays
+    # in the same coordinate system.
+    full = preprocess_image(image, deskew=False)
+    variants: list[tuple[str, np.ndarray]] = [("full", full)]
+
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    low_red = cv2.inRange(hsv, np.array([0, 55, 55]), np.array([16, 255, 255]))
+    high_red = cv2.inRange(hsv, np.array([164, 55, 55]), np.array([180, 255, 255]))
+    red_mask = cv2.bitwise_or(low_red, high_red)
+
+    # Keep small characters connected without turning the dimension lines into
+    # a thick block. PaddleOCR reads dark text on a light surface reliably.
+    red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
+    if cv2.countNonZero(red_mask) > 100:
+        red_only = np.full(image.shape[:2], 255, dtype=np.uint8)
+        red_only[red_mask > 0] = 0
+        variants.append(("red_dimensions", cv2.cvtColor(red_only, cv2.COLOR_GRAY2BGR)))
+
+    return variants
