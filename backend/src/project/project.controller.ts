@@ -184,6 +184,16 @@ export class ProjectController {
     const alive = this.getVisionConfigs().filter((c) =>
       !this.deadProviders.has(c.apiUrl) && (!requireImages || c.supportsImages),
     );
+    if (requireImages) {
+      const preferredImageProvider = (process.env.VISION_IMAGE_PROVIDER || '').trim().toLowerCase();
+      if (preferredImageProvider) {
+        alive.sort((left, right) => {
+          const leftPreferred = (left.name || '').toLowerCase() === preferredImageProvider ? 0 : 1;
+          const rightPreferred = (right.name || '').toLowerCase() === preferredImageProvider ? 0 : 1;
+          return leftPreferred - rightPreferred;
+        });
+      }
+    }
     if (!alive.length) {
       console.warn('[AI Reader] Nenhum provedor Vision disponível (sem chave ou todos sem quota).');
       return null;
