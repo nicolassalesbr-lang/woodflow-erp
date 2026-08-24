@@ -260,6 +260,7 @@ export default function Projects() {
   const [projects, setProjects] = useState<any[]>([]);
   const [selectedProj, setSelectedProj] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
+  const [reviewingPdf, setReviewingPdf] = useState(false);
   const [parseStage, setParseStage] = useState("");
   const [newProjName, setNewProjName] = useState("");
   const [newProjDesc, setNewProjDesc] = useState("");
@@ -306,7 +307,6 @@ export default function Projects() {
   const [viewStyle, setViewStyle] = useState<string>("textured");
   const [doorOpenAngle, setDoorOpenAngle] = useState<number>(0);
   const [viewMode, setViewMode] = useState<'raw' | 'all'>('raw');
-  const [reviewingPdf, setReviewingPdf] = useState(false);
 
   const canvasNestingRef = useRef<HTMLCanvasElement>(null);
 
@@ -350,6 +350,12 @@ export default function Projects() {
     () => [...selectedItems, ...pendingInterpretationItems],
     [selectedItems, pendingInterpretationItems],
   );
+  const interpretation = selectedProj?.digitalTwin?.interpretation;
+  const reviewableItems = (interpretation?.environments || [])
+    .flatMap((environment: any) => environment.items || [])
+    .filter((item: any) => item.quoteStatus !== "READY" || (item.validation?.issues || []).some((issue: any) => issue.severity === "WARNING"));
+  const hasStoredSourceDocuments = Boolean(selectedProj?.digitalTwin?.sourceDocuments?.length);
+  const engineering = budget?.engineering || selectedProj?.digitalTwin?.engineering || null;
   
   const environments = useMemo(() => {
     const names = detailItems.map((item: any) => item.environment);
@@ -443,7 +449,8 @@ export default function Projects() {
     EXTRACTING: "Lendo folhas...",
     QUEUE: "Na fila...",
     INTERPRETING: "Interpretando desenhos...",
-    VALIDATING: "Montando modelo 3D...",
+    VALIDATING: "Validando medidas e materiais...",
+    REVIEWING: "Revisando cotas pendentes no PDF...",
   };
 
   // Parse assíncrono: acompanha parseStatus/parseProgress até concluir (evita 504 do nginx).
@@ -470,31 +477,6 @@ export default function Projects() {
       } catch {
         /* rede instável — continua tentando */
       }
-    }
-  };
-
-  const reviewPdf = async (projectId: string) => {
-    setReviewingPdf(true);
-    setParseStage('Revisando vistas e cortes...');
-    try {
-      const response = await fetch(`${getApiUrl()}/api/projects/${projectId}/review-pdf`, {
-        method: 'POST',
-        headers: { Authorization: 'Bearer mock-jwt-token-2026' },
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.message || 'Não foi possível iniciar a revisão.');
-      if (data?.started === false) {
-        alert(data?.message || 'Não há pendências para revisar.');
-        await fetchProjects();
-        return;
-      }
-      await pollParseStatus(projectId);
-      await fetchProjects();
-    } catch (error: any) {
-      alert(error?.message || 'Falha ao revisar o PDF.');
-    } finally {
-      setReviewingPdf(false);
-      setParseStage('');
     }
   };
 
@@ -542,6 +524,36 @@ export default function Projects() {
     setParseStage("");
   };
 
+  const reviewPdf = async () => {
+    if (!selectedProj || reviewingPdf || reviewableItems.length === 0) return;
+    setReviewingPdf(true);
+    setParseStage("Selecionando pendencias para revisao...");
+    try {
+      const res = await fetch(`${getApiUrl()}/api/projects/${selectedProj.id}/review-pdf`, {
+        method: "POST",
+        headers: { Authorization: "Bearer mock-jwt-token-2026" },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data?.message || "Nao foi possivel iniciar a revisao do PDF.");
+        return;
+      }
+      if (!data.started) {
+        alert(data.message || "Nao ha pendencias para revisar.");
+        return;
+      }
+      setParseStage(`Revisando ${data.targets || reviewableItems.length} item(ns) com pendencia...`);
+      await pollParseStatus(selectedProj.id);
+      await fetchProjects();
+    } catch (error) {
+      console.error("Erro na revisao dirigida do PDF:", error);
+      alert("Erro ao conectar com o servidor para revisar o PDF.");
+    } finally {
+      setReviewingPdf(false);
+      setParseStage("");
+    }
+  };
+
   const calculateBudget = async () => {
     if (!selectedProj) return;
     setCalculating(true);
@@ -557,7 +569,10 @@ export default function Projects() {
           margin,
           commission,
           taxPercent,
-          wastePercent
+          wastePercent,
+          sheetPrice,
+          edgePricePerMeter: edgePrice,
+          laborPricePerHour: Math.round(laborPrice / 0.85)
         })
       });
       if (res.ok) {
@@ -1839,11 +1854,11 @@ export default function Projects() {
   }, [nestingSheets, selectedSheetIndex]);
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6 overflow-hidden">
       {/* Upper Hero Card */}
       <section className="overflow-hidden rounded-2xl border border-[#e8d4b8]/12 bg-[#211811]/78">
-        <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr]">
-          <div className="p-6 md:p-8">
+        <div className="grid min-w-0 grid-cols-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+          <div className="min-w-0 p-6 md:p-8">
             <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#d6ad79]/28 bg-[#d6ad79]/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-[#ead5ba]">
               <Sparkles className="h-3.5 w-3.5" />
               Projetos sob medida
@@ -1856,7 +1871,7 @@ export default function Projects() {
             </p>
           </div>
 
-          <div className="border-t border-[#e8d4b8]/10 bg-[#fff7ed]/[0.035] p-6 md:p-8 lg:border-l lg:border-t-0">
+          <div className="min-w-0 border-t border-[#e8d4b8]/10 bg-[#fff7ed]/[0.035] p-6 md:p-8 lg:border-l lg:border-t-0">
             <button
               onClick={() => setShowAddForm((value) => !value)}
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#ead5ba] px-5 py-3 text-sm font-bold text-[#20170f] transition hover:bg-[#ffe4bf]"
@@ -1895,7 +1910,7 @@ export default function Projects() {
       </section>
 
       {/* Main Grid */}
-      <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+      <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(280px,360px)_minmax(0,1fr)]">
         {/* Left projects list */}
         <aside className="min-w-0 space-y-3">
           {projects.map((project) => {
@@ -1904,7 +1919,7 @@ export default function Projects() {
               <button
                 key={project.id}
                 onClick={() => setSelectedProj(project)}
-                className={`w-full rounded-2xl border p-5 text-left transition ${
+                className={`min-w-0 w-full rounded-2xl border p-5 text-left transition ${
                   active 
                     ? "border-[#d6ad79]/38 bg-[#d6ad79]/12" 
                     : "border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] hover:border-[#d6ad79]/28"
@@ -1918,7 +1933,7 @@ export default function Projects() {
                     {project.items.length} itens
                   </span>
                 </div>
-                <h3 className="truncate font-semibold tracking-tight text-[#fff8f0]">
+                <h3 className="font-semibold tracking-tight text-[#fff8f0]">
                   {project.name}
                 </h3>
                 <p className="mt-2 line-clamp-2 text-sm leading-5 text-[#bba890]">
@@ -1930,18 +1945,18 @@ export default function Projects() {
         </aside>
 
         {/* Right selected project details */}
-        <main className="min-h-[520px] min-w-0 rounded-2xl border border-[#e8d4b8]/12 bg-[#211811]/70 p-5 md:p-7">
+        <main className="min-w-0 overflow-hidden rounded-2xl border border-[#e8d4b8]/12 bg-[#211811]/70 p-5 md:p-7">
           {selectedProj ? (
             <div className="min-w-0 space-y-7">
               {/* Selected Project Header */}
-              <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-start">
-                <div>
+              <div className="flex min-w-0 flex-col justify-between gap-4 2xl:flex-row 2xl:items-start">
+                <div className="min-w-0">
                   <div className="mb-3 flex flex-wrap items-center gap-2">
                     <span className="rounded-full bg-[#d6ad79]/14 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-[#ead5ba]">
                       {statusLabel[selectedProj.status] || selectedProj.status}
                     </span>
                     {selectedProj.originalFileUrl && (
-                      <span className="max-w-full break-all rounded-full border border-[#e8d4b8]/12 px-3 py-1 text-xs text-[#bba890]">
+                      <span className="max-w-full truncate rounded-full border border-[#e8d4b8]/12 px-3 py-1 text-xs text-[#bba890]">
                         {selectedProj.originalFileUrl}
                       </span>
                     )}
@@ -1954,7 +1969,7 @@ export default function Projects() {
                   </p>
                 </div>
 
-                <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
                   <label
                     className={`inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#d6ad79]/30 bg-[#d6ad79]/10 px-4 py-3 text-sm font-bold text-[#ead5ba] transition hover:bg-[#d6ad79]/16 ${
                       uploading ? "pointer-events-none opacity-60" : ""
@@ -1969,25 +1984,26 @@ export default function Projects() {
                       onChange={(event) => handleFileChange(event, selectedProj.id)}
                     />
                   </label>
-                  {selectedProj.originalFileUrl && pendingInterpretationItems.length > 0 && (
+                  {reviewableItems.length > 0 && (
                     <button
                       type="button"
-                      disabled={reviewingPdf || uploading}
-                      onClick={() => reviewPdf(selectedProj.id)}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#e8d4b8]/18 bg-[#211811] px-4 py-3 text-sm font-bold text-[#ead5ba] transition hover:border-[#d6ad79]/35 disabled:cursor-not-allowed disabled:opacity-55"
+                      onClick={reviewPdf}
+                      disabled={uploading || reviewingPdf}
+                      title={hasStoredSourceDocuments ? "Reler somente os itens pendentes ou com alerta" : "Este projeto precisa que o PDF seja reenviado uma vez para habilitar a releitura"}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#e8d4b8]/20 bg-[#211811] px-4 py-3 text-sm font-bold text-[#ead5ba] transition hover:border-[#d6ad79]/50 hover:bg-[#d6ad79]/10 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      <RotateCw className={`h-4 w-4 ${reviewingPdf ? 'animate-spin' : ''}`} />
-                      {reviewingPdf ? (parseStage || 'Revisando PDF...') : 'Revisar PDF'}
+                      <RotateCw className={`h-4 w-4 ${reviewingPdf ? "animate-spin" : ""}`} />
+                      {reviewingPdf ? (parseStage || "Revisando PDF...") : "Revisar PDF"}
                     </button>
                   )}
                 </div>
               </div>
 
               {/* Navigation Tabs */}
-              <div className="flex min-w-0 overflow-x-auto border-b border-[#e8d4b8]/10">
+              <div className="flex overflow-x-auto border-b border-[#e8d4b8]/10">
                 <button
                   onClick={() => setActiveTab("details")}
-                  className={`shrink-0 border-b-2 px-5 py-3 text-sm font-bold transition ${
+                  className={`border-b-2 px-5 py-3 text-sm font-bold transition ${
                     activeTab === "details"
                       ? "border-[#d6ad79] text-[#fff8f0]"
                       : "border-transparent text-[#cdbca7] hover:text-[#fff8f0]"
@@ -1995,9 +2011,10 @@ export default function Projects() {
                 >
                   📋 Detalhes
                 </button>
+                {false && (
                 <button
                   onClick={() => setActiveTab("model3d")}
-                  className={`shrink-0 border-b-2 px-5 py-3 text-sm font-bold transition ${
+                  className={`border-b-2 px-5 py-3 text-sm font-bold transition ${
                     activeTab === "model3d"
                       ? "border-[#d6ad79] text-[#fff8f0]"
                       : "border-transparent text-[#cdbca7] hover:text-[#fff8f0]"
@@ -2005,9 +2022,10 @@ export default function Projects() {
                 >
                   📐 Modelo 3D
                 </button>
+                )}
                 <button
                   onClick={() => setActiveTab("budgeting")}
-                  className={`shrink-0 border-b-2 px-5 py-3 text-sm font-bold transition ${
+                  className={`border-b-2 px-5 py-3 text-sm font-bold transition ${
                     activeTab === "budgeting"
                       ? "border-[#d6ad79] text-[#fff8f0]"
                       : "border-transparent text-[#cdbca7] hover:text-[#fff8f0]"
@@ -2047,11 +2065,63 @@ export default function Projects() {
                     </div>
                   )}
 
+                  {interpretation && (
+                    <div className="rounded-xl border border-[#d6ad79]/18 bg-[#211811]/70 p-4">
+                      <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#d6ad79]">
+                            Motor tecnico de interpretacao
+                          </p>
+                          <h3 className="mt-1 text-base font-semibold text-[#fff8f0]">
+                            {interpretation.validation?.status === "READY_TO_QUOTE"
+                              ? "Interpretacao pronta para orcamento"
+                              : interpretation.validation?.status === "BLOCKED"
+                                ? "Interpretacao bloqueada para revisao"
+                                : "Interpretacao precisa de revisao"}
+                          </h3>
+                        </div>
+                        <div className="grid w-full grid-cols-3 gap-2 text-center sm:w-auto sm:min-w-[320px]">
+                          <div className="rounded-lg border border-[#e8d4b8]/12 bg-[#100b08]/55 px-3 py-2">
+                            <p className="text-lg font-black text-[#fff8f0]">{interpretation.summary?.readyToQuote || 0}</p>
+                            <p className="text-[10px] uppercase tracking-[0.12em] text-[#a99680]">prontos</p>
+                          </div>
+                          <div className="rounded-lg border border-[#e8d4b8]/12 bg-[#100b08]/55 px-3 py-2">
+                            <p className="text-lg font-black text-[#fff8f0]">{interpretation.summary?.pendingMeasurements || 0}</p>
+                            <p className="text-[10px] uppercase tracking-[0.12em] text-[#a99680]">pendentes</p>
+                          </div>
+                          <div className="rounded-lg border border-[#e8d4b8]/12 bg-[#100b08]/55 px-3 py-2">
+                            <p className="text-lg font-black text-[#fff8f0]">{interpretation.summary?.warnings || 0}</p>
+                            <p className="text-[10px] uppercase tracking-[0.12em] text-[#a99680]">alertas</p>
+                          </div>
+                        </div>
+                      </div>
+                      {interpretation.validation?.requiredQuestions?.length > 0 && (
+                        <div className="mt-3 border-t border-[#e8d4b8]/10 pt-3">
+                          <p className="mb-2 text-xs font-semibold text-[#ead5ba]">Pendencias para fechar com seguranca:</p>
+                          <div className="flex flex-wrap gap-2">
+                            {interpretation.validation.requiredQuestions.slice(0, 4).map((q: string) => (
+                              <span key={q} className="rounded-full border border-[#e8d4b8]/14 bg-[#100b08]/50 px-3 py-1 text-xs text-[#cdbca7]">
+                                {q}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {interpretation.review && (
+                        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[#e8d4b8]/10 pt-3 text-xs text-[#cdbca7]">
+                          <span className="font-semibold text-[#ead5ba]">Ultima revisao do PDF:</span>
+                          <span>{interpretation.review.resolvedItems || 0} item(ns) completado(s)</span>
+                          <span className="text-[#a99680]">{interpretation.review.unresolvedItems || 0} ainda precisam de confirmacao</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="grid min-w-0 grid-cols-1 gap-5 2xl:grid-cols-[minmax(0,1fr)_300px]">
                     {/* Left: Ambientes e Medidas agrupados */}
                     <div className="min-w-0">
-                      <div className="mb-4 flex flex-col gap-3 border-b border-[#e8d4b8]/10 pb-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div>
+                      <div className="mb-4 flex min-w-0 flex-col gap-3 border-b border-[#e8d4b8]/10 pb-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
                           <h3 className="text-lg font-semibold tracking-tight text-[#fff8f0]">
                             Ambientes e medidas
                           </h3>
@@ -2063,10 +2133,10 @@ export default function Projects() {
                         </div>
 
                         {/* Toggle Mode Button */}
-                        <div className="flex max-w-full flex-wrap items-center gap-1 rounded-xl border border-[#e8d4b8]/15 bg-[#18120d] p-1">
+                        <div className="flex w-full shrink-0 items-center gap-1 overflow-x-auto rounded-xl border border-[#e8d4b8]/15 bg-[#18120d] p-1 sm:w-auto">
                           <button
                             onClick={() => setViewMode('raw')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                            className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                               viewMode === 'raw'
                                 ? "bg-[#ead5ba] text-[#20170f] shadow"
                                 : "text-[#bba890] hover:text-[#ead5ba]"
@@ -2076,7 +2146,7 @@ export default function Projects() {
                           </button>
                           <button
                             onClick={() => setViewMode('all')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                            className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                               viewMode === 'all'
                                 ? "bg-[#ead5ba] text-[#20170f] shadow"
                                 : "text-[#bba890] hover:text-[#ead5ba]"
@@ -2098,8 +2168,8 @@ export default function Projects() {
                             const envArea = envItems.reduce((s: number, i: any) => s + (i.area || 0), 0);
                             const envQty = envItems.reduce((s: number, i: any) => s + (i.quantity || 1), 0);
                             return (
-                              <div key={env}>
-                                <div className="mb-2.5 flex items-center justify-between gap-3 border-b border-[#e8d4b8]/10 pb-2">
+                              <div key={env} className="min-w-0">
+                                <div className="mb-2.5 flex min-w-0 items-center justify-between gap-3 border-b border-[#e8d4b8]/10 pb-2">
                                   <h4 className="text-sm font-bold uppercase tracking-[0.14em] text-[#c89a63]">{env}</h4>
                                   <span className="shrink-0 text-[11px] text-[#a99680]">
                                     {envItems.length} móveis · {envQty} un · {envArea.toFixed(1)} m²
@@ -2434,10 +2504,85 @@ export default function Projects() {
               {/* TAB 3: BUDGET & CUTTING LAYOUT */}
               {activeTab === "budgeting" && (
                 <div className="space-y-6">
+                  {engineering && (
+                    <section className="rounded-xl border border-[#e8d4b8]/10 bg-[#211811]/55 p-5">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#c89a63]">
+                            Engenharia tecnica
+                          </p>
+                          <h3 className="mt-1 text-lg font-semibold text-[#fff8f0]">
+                            Lista de componentes calculada por regras
+                          </h3>
+                          <p className="mt-1 max-w-3xl text-xs text-[#bba890]">
+                            A IA identifica os moveis medidos. O consumo, ferragens, chapas, fita e custo sao calculados por motor deterministico.
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          <MiniStat label="Componentes" value={engineering.summary?.components || 0} />
+                          <MiniStat label="Paineis" value={engineering.summary?.panels || 0} />
+                          <MiniStat label="Fita" value={`${Number(engineering.summary?.edgeMeters || 0).toFixed(0)} m`} />
+                          <MiniStat label="Chapas" value={engineering.summary?.sheets || 0} />
+                        </div>
+                      </div>
+
+                      <div className="mt-5 grid min-w-0 grid-cols-1 gap-3 2xl:grid-cols-[minmax(0,1fr)_360px]">
+                        <div className="min-w-0 overflow-hidden rounded-lg border border-[#e8d4b8]/10">
+                          <div className="grid grid-cols-[minmax(0,1fr)_72px_56px_82px] gap-2 bg-[#18120d] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[#a99680] sm:grid-cols-[minmax(0,1fr)_90px_90px_90px]">
+                            <span>Componente</span>
+                            <span className="text-right">Consumo</span>
+                            <span className="text-right">Unid.</span>
+                            <span className="text-right">Custo</span>
+                          </div>
+                          <div className="max-h-64 overflow-y-auto">
+                            {(engineering.components || []).slice(0, 36).map((component: any, idx: number) => (
+                              <div key={`${component.code || idx}`} className="grid grid-cols-[minmax(0,1fr)_72px_56px_82px] gap-2 border-t border-[#e8d4b8]/6 px-3 py-2 text-xs text-[#ead5ba] sm:grid-cols-[minmax(0,1fr)_90px_90px_90px]">
+                                <div className="min-w-0">
+                                  <p className="truncate font-semibold text-[#fff8f0]">{component.label}</p>
+                                  <p className="truncate text-[11px] text-[#a99680]">{component.furniture}</p>
+                                </div>
+                                <span className="text-right font-mono">{Number(component.consumption || 0).toFixed(component.unit === "un" ? 0 : 2)}</span>
+                                <span className="text-right">{component.unit}</span>
+                                <span className="text-right font-semibold">{brl(component.totalCost || 0)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="min-w-0 rounded-lg border border-[#e8d4b8]/10 bg-[#18120d]/45 p-4">
+                          <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#c89a63]">
+                            Materiais calculados
+                          </p>
+                          <div className="mt-3 space-y-2">
+                            {(engineering.materials || []).map((material: any) => (
+                              <div key={material.material} className="flex items-start justify-between gap-3 text-xs">
+                                <div className="min-w-0">
+                                  <p className="truncate font-semibold text-[#fff8f0]">{material.material}</p>
+                                  <p className="text-[#a99680]">{Number(material.panelAreaM2 || 0).toFixed(2)} m2 de paineis</p>
+                                </div>
+                                <div className="text-right text-[#ead5ba]">
+                                  <p className="font-semibold">{material.sheets} ch</p>
+                                  <p className="text-[#a99680]">{brl(material.cost || 0)}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          {!!engineering.validations?.length && (
+                            <div className="mt-4 rounded-lg border border-[#fb923c]/20 bg-[#fb923c]/10 p-3 text-xs text-[#ffd7aa]">
+                              {engineering.validations.slice(0, 3).map((issue: any, idx: number) => (
+                                <p key={idx}>{issue.message}</p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </section>
+                  )}
+
                   {/* Calculations setup */}
-                  <section className="grid min-w-0 grid-cols-1 gap-5 2xl:grid-cols-[minmax(0,1fr)_380px]">
+                  <section className="grid min-w-0 grid-cols-1 gap-5 2xl:grid-cols-[minmax(0,1fr)_360px]">
                     {/* Left: Interactive nesting canvas */}
-                    <div className="rounded-2xl border border-[#e8d4b8]/10 bg-[#0b0907] p-5 space-y-4">
+                    <div className="min-w-0 rounded-2xl border border-[#e8d4b8]/10 bg-[#0b0907] p-5 space-y-4">
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-[#e8d4b8]/10">
                         <div>
                           <h3 className="font-semibold text-[#fff8f0]">Plano de Corte (Nesting 2D)</h3>
@@ -2721,11 +2866,11 @@ function ItemDetailCard({ item }: { item: any }) {
   return (
     <div 
       onClick={() => setExpanded(!expanded)}
-      className="rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] p-3.5 transition hover:border-[#d6ad79]/40 cursor-pointer select-none group space-y-3"
+      className="min-w-0 rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] p-3.5 transition hover:border-[#d6ad79]/40 cursor-pointer select-none group space-y-3"
     >
       {/* Compact Collapsed Header (Always Visible) */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
           {item.codigo ? (
             <span className="flex h-5 min-w-[20px] items-center justify-center rounded bg-[#d6ad79] px-1.5 text-[10px] font-black text-[#20170f]">
               {item.codigo}
@@ -2748,8 +2893,8 @@ function ItemDetailCard({ item }: { item: any }) {
 
         {/* Compact Dimensions L (mm) | A (mm) | P (mm) */}
         {hasMeasures && (
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="flex items-center gap-2.5 bg-[#211811]/80 px-3 py-1.5 rounded-lg border border-[#e8d4b8]/10 text-xs font-mono text-[#e8d9c6]">
+          <div className="flex w-full shrink-0 items-center gap-3 sm:w-auto">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-[#e8d4b8]/10 bg-[#211811]/80 px-3 py-1.5 text-xs font-mono text-[#e8d9c6] sm:flex-none">
               <span><span className="text-[#a99680] text-[10px]">L:</span> <strong className="text-white">{dimension(item.width)}</strong></span>
               <span><span className="text-[#a99680] text-[10px]">A:</span> <strong className="text-white">{dimension(item.height)}</strong></span>
               <span><span className="text-[#a99680] text-[10px]">P:</span> <strong className="text-white">{dimension(item.depth)}</strong></span>

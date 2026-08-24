@@ -5,17 +5,25 @@ import numpy as np
 # Singleton instance to keep model in memory
 _ocr_instance = None
 
+
+def _create_ocr():
+    """Create the PaddleOCR 3.x engine with stable CPU settings."""
+    return PaddleOCR(
+        lang="pt",
+        device="cpu",
+        enable_mkldnn=False,
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
+        use_textline_orientation=True,
+    )
+
+
 def get_ocr():
     global _ocr_instance
     if _ocr_instance is None:
-        _ocr_instance = PaddleOCR(
-            use_angle_cls=True, 
-            lang='pt', 
-            use_gpu=False, # PADDLEOCR_USE_GPU
-            show_log=False,
-            # PADDLEOCR_ENABLE_ANGLE_CLASSIFICATION is covered by use_angle_cls
-        )
+        _ocr_instance = _create_ocr()
     return _ocr_instance
+
 
 def _rotate(image: np.ndarray, orientation: int) -> np.ndarray:
     if orientation == 90:
@@ -45,26 +53,34 @@ def run_paddle_ocr(
     variant: str = "full",
     orientations: tuple[int, ...] = (0,),
 ):
-    """
-    Runs PaddleOCR on a numpy array image and returns structured data.
-    """
+    """Run PaddleOCR 3.x on the requested orientations and return structured data."""
     ocr = get_ocr()
     extracted_items = []
     height, width = image_array.shape[:2]
 
     for orientation in orientations:
-        result = ocr.ocr(_rotate(image_array, orientation), cls=True)
-        if result is None or len(result) == 0 or result[0] is None:
+        result = ocr.predict(_rotate(image_array, orientation))
+        if not result:
             continue
+        page_result = result[0]
+        if page_result is None or not hasattr(page_result, "get"):
+            continue
+        texts = page_result.get("rec_texts", [])
+        scores = page_result.get("rec_scores", [])
+        polygons = page_result.get("rec_polys", [])
 
-        for line in result[0]:
-            box = line[0]
-            txt = str(line[1][0]).strip()
-            confidence = float(line[1][1])
+        for txt, confidence, box in zip(texts, scores, polygons):
+            txt = str(txt).strip()
+            confidence = float(confidence)
             if not txt or confidence < 0.55:
                 continue
-
-            original_points = [_to_original(point, width, height, orientation) for point in box]
+            box_array = np.asarray(box)
+            if box_array.size == 0:
+                continue
+            original_points = [
+                _to_original([float(point[0]), float(point[1])], width, height, orientation)
+                for point in box_array
+            ]
             xs = [point[0] for point in original_points]
             ys = [point[1] for point in original_points]
             extracted_items.append({
