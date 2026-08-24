@@ -5,7 +5,7 @@ import tempfile
 import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Any, List, Optional
 
 # Placeholders for future imports
 # from pipeline.extractor import extract_pdf
@@ -60,25 +60,70 @@ def _dedupe_items(items: list[dict]) -> list[dict]:
     return list(best.values())
 
 
-def _page_context(native_blocks: list[dict], ocr_items: list[dict], width: float, height: float) -> str:
+def _native_layer_is_reliable(blocks: list[dict]) -> bool:
+    texts = [block.get("text", "") for block in blocks]
+    char_count = sum(len(text) for text in texts)
+    if char_count >= 80:
+        return True
+    # Covers can be intentionally sparse while still containing an exact text
+    # layer. OCR adds no dimensional evidence on those pages.
+    joined = " ".join(texts)
+    return char_count >= 40 and bool(re.search(r"clientes|detalhamento de projeto", joined, re.IGNORECASE))
+
+
+def _page_context(
+    native_blocks: list[dict],
+    ocr_items: list[dict],
+    width: float,
+    height: float,
+    native_width: Optional[float] = None,
+    native_height: Optional[float] = None,
+) -> str:
     native_text = [block["text"] for block in native_blocks]
     ocr_text = [item["text"] for item in ocr_items if item.get("variant") == "full"]
+    sheet_identity = [text for text in native_text if re.search(
+        r"clientes|detalhamento|fachada|área|area|despensa|cozinha|layout|vista\s*\d|\d+\s*\|\s*\d+",
+        text,
+        re.IGNORECASE,
+    )]
     dimensions = []
+    if native_blocks:
+        native_width = native_width or max((block["bbox"][2] for block in native_blocks), default=1)
+        native_height = native_height or max((block["bbox"][3] for block in native_blocks), default=1)
+        for block in native_blocks:
+            if not _looks_like_measurement(block["text"]):
+                continue
+            x1, y1, x2, y2 = block["bbox"]
+            direction = block.get("direction") or (1.0, 0.0)
+            orientation = "vertical" if abs(direction[1]) > abs(direction[0]) else "horizontal"
+            normalized_y = ((y1 + y2) / 2) / native_height
+            region = "carimbo" if normalized_y > 0.82 else "desenho"
+            dimensions.append(
+                f'{block["text"]}@({((x1 + x2) / 2) / native_width:.3f},'
+                f'{normalized_y:.3f});conf=1.00;orient={orientation};'
+                f'regiao={region};fonte=pdf_vetorial'
+            )
     for item in ocr_items:
         if not _looks_like_measurement(item["text"]):
             continue
         box = item["bounding_box"]
         x = ((box["x1"] + box["x2"]) / 2) / max(width, 1)
         y = ((box["y1"] + box["y2"]) / 2) / max(height, 1)
+        region = "carimbo" if y > 0.82 else "desenho"
         dimensions.append(
             f'{item["text"]}@({x:.3f},{y:.3f});conf={item["confidence"]:.2f};'
-            f'rot={item.get("orientation", 0)};fonte={item.get("variant", "full")}'
+            f'rot={item.get("orientation", 0)};regiao={region};fonte={item.get("variant", "full")}'
         )
 
     # Dimension evidence comes first so dense title blocks cannot truncate it.
     parts = []
+    if sheet_identity:
+        parts.append("IDENTIFICACAO DA FOLHA:\n" + " | ".join(sheet_identity[:30]))
     if dimensions:
-        parts.append("COTAS OCR COM POSICAO/CONFIANCA:\n" + " | ".join(dimensions[:180]))
+        parts.append(
+            "COTAS COM POSICAO/CONFIANCA (numeros sem unidade nas linhas de cota estao em cm):\n"
+            + " | ".join(dimensions[:240])
+        )
     if native_text:
         parts.append("TEXTO VETORIAL:\n" + " | ".join(native_text)[:5000])
     if ocr_text:
@@ -103,10 +148,6 @@ async def analyze_document(file: UploadFile = File(...)):
             shutil.copyfileobj(file.file, buffer)
             
         from pipeline.extractor import extract_pdf_native
-        from pipeline.paddle_runner import run_paddle_ocr
-        from pipeline.preprocess import build_image_ocr_variants
-        import cv2
-        import numpy as np
         
         is_image = file.filename.lower().endswith(('.jpg', '.jpeg', '.png'))
         
@@ -114,24 +155,42 @@ async def analyze_document(file: UploadFile = File(...)):
         items_all = []
 
         native_pages = None if is_image else extract_pdf_native(temp_path)
-        def process_page(page_index: int, image: np.ndarray) -> None:
-            variants = build_image_ocr_variants(image)
+        def process_page(page_index: int, image: Any = None) -> None:
+            native_page = native_pages[page_index] if native_pages else {}
+            native_blocks = native_page.get("blocks", [])
+            # Vector PDFs provide exact glyphs and coordinates. OCR is a fallback
+            # for scanned/outlined pages, not a competing source that can distort
+            # already exact dimensions and multiply processing time.
+            reliable_native_layer = _native_layer_is_reliable(native_blocks)
             extracted_items = []
-            for variant_name, variant_image in variants:
-                extracted_items.extend(run_paddle_ocr(
-                    variant_image,
-                    page_num=page_index + 1,
-                    file_id=file.filename,
-                    variant=variant_name,
-                    orientations=(0, 90, 270),
-                ))
+            if not reliable_native_layer:
+                if image is None:
+                    raise ValueError(f"Page {page_index + 1} needs OCR but was not rendered")
+                from pipeline.paddle_runner import run_paddle_ocr
+                from pipeline.preprocess import build_image_ocr_variants
+                variants = build_image_ocr_variants(image)
+                for variant_name, variant_image in variants:
+                    extracted_items.extend(run_paddle_ocr(
+                        variant_image,
+                        page_num=page_index + 1,
+                        file_id=file.filename,
+                        variant=variant_name,
+                        orientations=(0, 90, 270),
+                    ))
             extracted_items = _dedupe_items(extracted_items)
             items_all.extend(extracted_items)
-            native_blocks = native_pages[page_index]["blocks"] if native_pages else []
-            height, width = variants[0][1].shape[:2]
-            contexts.append(_page_context(native_blocks, extracted_items, width, height))
+            height, width = image.shape[:2] if image is not None else (1, 1)
+            contexts.append(_page_context(
+                native_blocks,
+                extracted_items,
+                width,
+                height,
+                native_page.get("width"),
+                native_page.get("height"),
+            ))
 
         if is_image:
+            import cv2
             image = cv2.imread(temp_path)
             if image is None:
                 raise ValueError(f"Could not read image: {temp_path}")
@@ -143,6 +202,12 @@ async def analyze_document(file: UploadFile = File(...)):
             document = fitz.open(temp_path)
             try:
                 for page_index, page in enumerate(document):
+                    native_page = native_pages[page_index] if native_pages else {}
+                    if _native_layer_is_reliable(native_page.get("blocks", [])):
+                        process_page(page_index, None)
+                        continue
+                    import cv2
+                    import numpy as np
                     pix = page.get_pixmap(dpi=300, alpha=False)
                     rgb = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
                     process_page(page_index, cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))

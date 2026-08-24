@@ -345,6 +345,16 @@ REGRA DE CONFIABILIDADE (CRÃƒÂTICA Ã¢â‚¬â€ NUNCA VIOLE)
 - A confiabilidade do orÃƒÂ§amento depende 100% de medidas reais dos documentos.
 
 Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+LEITURA GEOMETRICA DE PRANCHAS EXECUTIVAS
+- Antes de extrair moveis, leia o carimbo: ambiente, nome da vista, numero da folha e escala. Agrupe todas as folhas do mesmo ambiente, mesmo quando nao forem consecutivas.
+- Em pranchas arquitetonicas brasileiras, numeros isolados sobre linhas de cota estao em CENTIMETROS quando nao houver outra unidade explicita. Normalize para milimetros: 518 = 5180 mm; 65 = 650 mm; 4 = 40 mm. Textos com unidade explicita seguem a unidade escrita.
+- Ignore como medidas do movel: escala 1:25/1:50, numero da folha, data, CAU, temperatura de LED (3000K), numeros de perspectiva, codigo de produto e cotas marcadas como regiao=carimbo.
+- Planta/layout fornece largura e profundidade. Vista frontal fornece largura e altura. Vista lateral/corte fornece profundidade e altura. Una essas vistas pelo ambiente, nome VISTA 01/02/03, posicao e descricao do mesmo conjunto.
+- Cadeias externas de cotas representam dimensoes totais. Cadeias internas representam a divisao em modulos. Associe cada segmento ao retangulo delimitado pelas linhas de extensao; nao use o numero apenas por proximidade textual.
+- Portas, basculantes, gavetas, prateleiras, nichos e espacos de eletro sao componentes internos. Nao os transforme em moveis independentes quando pertencem a um unico balcao, aereo, torre ou ilha.
+- Extraia um item por modulo de marcenaria fabricavel. A descricao deve registrar quantidade/tipo de portas, gavetas, nichos, material, ferragem e a origem das dimensoes.
+- Se uma folha de observacoes tiver clientes diferentes dos clientes do projeto, nao use essa folha para criar ou dimensionar moveis.
+
 MÃƒÅ¡LTIPLOS DOCUMENTOS DO MESMO PROJETO
 Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 - O projeto pode conter vÃƒÂ¡rios documentos: pranchas executivas com cotas, renders 3D, fotos de referÃƒÂªncia.
@@ -495,13 +505,36 @@ Nota: Se a dimensÃƒÂ£o nÃƒÂ£o estÃƒÂ¡ cotada, use null:
     return merged;
   }
 
+  private documentGroup(value: string): string | null {
+    const text = this.normKey(value);
+    if (/area gourmet/.test(text)) return 'area_gourmet';
+    if (/area de servico|area servico/.test(text)) return 'area_servico';
+    if (/despensa/.test(text)) return 'despensa';
+    if (/fachada/.test(text)) return 'fachada';
+    return null;
+  }
+
+  private targetDocumentGroup(target: any): string | null {
+    const text = this.normKey(`${target.environment || ''} ${target.description || ''}`);
+    if (/cozinha|gourmet/.test(text)) return 'area_gourmet';
+    if (/area de servico|area servico|lavanderia/.test(text)) return 'area_servico';
+    if (/despensa/.test(text)) return 'despensa';
+    if (/fachada/.test(text)) return 'fachada';
+    return null;
+  }
+
   /**
    * A profundidade costuma estar no corte/vista lateral imediatamente anterior
    * ou posterior à vista frontal. Revisar somente a página onde o móvel foi
    * identificado impede a segunda leitura de encontrar a terceira dimensão.
    */
-  private reviewPageIndexes(targets: any[], pageCount: number): number[] {
+  private reviewPageIndexes(targets: any[], pageCount: number, contexts: string[] = []): number[] {
     const pages = new Set<number>();
+    const targetGroups = new Set(targets.map((target) => this.targetDocumentGroup(target)).filter(Boolean));
+    contexts.forEach((context, index) => {
+      const pageGroup = this.documentGroup(context || '');
+      if (pageGroup && targetGroups.has(pageGroup)) pages.add(index);
+    });
     for (const target of targets) {
       const page = Number(target?.evidence?.sourcePage);
       if (!Number.isInteger(page) || page < 1) continue;
@@ -513,7 +546,12 @@ Nota: Se a dimensÃƒÂ£o nÃƒÂ£o estÃƒÂ¡ cotada, use null:
   }
 
   /** Limit the prompt to targets whose source is on this sheet or a neighbour. */
-  private reviewTargetsForPage(targets: any[], pageNumber: number): any[] {
+  private reviewTargetsForPage(targets: any[], pageNumber: number, context: string = ''): any[] {
+    const pageGroup = this.documentGroup(context);
+    if (pageGroup) {
+      const grouped = targets.filter((target) => this.targetDocumentGroup(target) === pageGroup);
+      if (grouped.length) return grouped;
+    }
     const nearby = targets.filter((target) => {
       const sourcePage = Number(target?.evidence?.sourcePage);
       return Number.isInteger(sourcePage) && Math.abs(sourcePage - pageNumber) <= 1;
@@ -1605,9 +1643,9 @@ Use milÃƒÂ­metros para TODAS as dimensÃƒÂµes e coordenadas X, Y, Z. NÃ�
           hasStructuredContext: contexts.some((context) => Boolean(context && context.length > 20)),
         });
 
-        const pagesToReview = this.reviewPageIndexes(targets, pageImages.length);
+        const pagesToReview = this.reviewPageIndexes(targets, pageImages.length, contexts);
         const fromDocument = await this.runPool(pagesToReview, 1, async (pageIndex) => {
-          const pageTargets = this.reviewTargetsForPage(targets, pageIndex + 1);
+          const pageTargets = this.reviewTargetsForPage(targets, pageIndex + 1, contexts[pageIndex]);
           return this.analyzeTargetedReviewPage(
             cfg,
             pageImages[pageIndex],

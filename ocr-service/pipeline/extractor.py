@@ -18,6 +18,7 @@ def extract_pdf_native(file_path: str):
         for block in text_dict.get("blocks", []):
             if block.get("type") == 0:  # Text block
                 for line in block.get("lines", []):
+                    direction = line.get("dir", (1.0, 0.0))
                     for span in line.get("spans", []):
                         text = span.get("text", "").strip()
                         if text:
@@ -25,7 +26,10 @@ def extract_pdf_native(file_path: str):
                             bbox = span.get("bbox")  # (x0, y0, x1, y1)
                             blocks.append({
                                 "text": text,
-                                "bbox": bbox
+                                "bbox": bbox,
+                                "direction": direction,
+                                "font_size": span.get("size"),
+                                "color": span.get("color"),
                             })
         
         pages_data.append({

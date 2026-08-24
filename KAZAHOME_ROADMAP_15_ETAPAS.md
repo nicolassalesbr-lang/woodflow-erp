@@ -126,6 +126,22 @@ Um móvel somente poderá receber `READY` quando as dimensões obrigatórias par
 - O casamento textual anterior permanece apenas como fallback para provedores que não devolvam o identificador.
 - Validação: TypeScript sem erros no backend e frontend.
 
+#### 2026-08-24 — Leitura orientada por geometria validada no PDF Eunice
+
+- Auditadas visual e textualmente as 13 páginas do projeto executivo real.
+- Identificado o padrão documental: números isolados nas linhas de cota estão em centímetros e devem ser normalizados para milímetros.
+- A camada vetorial do PDF passou a preservar posição, orientação, tamanho de fonte e cor de cada texto.
+- Cotas vetoriais agora entram no contexto com coordenadas normalizadas e orientação horizontal/vertical.
+- O carimbo inferior é classificado separadamente para impedir que escala, folha, data e CAU sejam interpretados como medidas.
+- A identificação da folha (ambiente, layout e vista) passou para o início do contexto, antes das cotas.
+- Folhas são agrupadas por ambiente: Área Gourmet/Cozinha, Área de Serviço, Despensa e Fachada.
+- A revisão não fica mais limitada a páginas adjacentes: layout, vista frontal, interior e corte do mesmo ambiente são correlacionados mesmo quando distantes.
+- Regras geométricas explicitam que layout fornece largura/profundidade, vista frontal fornece largura/altura e corte/lateral fornece profundidade/altura.
+- Portas, gavetas, basculantes, prateleiras, nichos e vãos de eletro são tratados como componentes do módulo, não como móveis independentes.
+- PyMuPDF é priorizado quando a camada vetorial é confiável; PaddleOCR fica como fallback para páginas escaneadas ou convertidas em curvas, reduzindo latência e falsos positivos.
+- Validação no documento real confirmou cotas críticas: layout da ilha 310 x 70 cm, elevação 310 x 94 cm, além da identificação das folhas de Área de Serviço e Despensa.
+- Validação técnica: sintaxe Python e TypeScript de backend/frontend sem erros.
+
 - [x] Auditar contratos atuais e identificar lacunas.
 - [x] Definir contrato-alvo e estados de evidência.
 - [ ] Criar tipos e schema de validação compartilhados.
