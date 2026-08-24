@@ -23,6 +23,7 @@ interface VisionConfig {
   headers: Record<string, string>;
   model?: string;
   name?: string;
+  supportsImages: boolean;
 }
 
 type UploadedProjectFile = {
@@ -179,8 +180,10 @@ export class ProjectController {
   }
 
   /** Primeiro provedor vivo (compatibilidade com os chamadores existentes). */
-  private getVisionConfig(): VisionConfig | null {
-    const alive = this.getVisionConfigs().filter((c) => !this.deadProviders.has(c.apiUrl));
+  private getVisionConfig(requireImages: boolean = false): VisionConfig | null {
+    const alive = this.getVisionConfigs().filter((c) =>
+      !this.deadProviders.has(c.apiUrl) && (!requireImages || c.supportsImages),
+    );
     if (!alive.length) {
       console.warn('[AI Reader] Nenhum provedor Vision disponível (sem chave ou todos sem quota).');
       return null;
@@ -200,6 +203,7 @@ export class ProjectController {
       },
       model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
       name: 'DeepSeek',
+      supportsImages: false,
     };
   }
 
@@ -215,6 +219,7 @@ export class ProjectController {
       },
       model: process.env.OPENAI_MODEL || 'gpt-4o',
       name: 'OpenAI',
+      supportsImages: true,
     };
   }
 
@@ -231,6 +236,7 @@ export class ProjectController {
       },
       model,
       name: 'Gemini',
+      supportsImages: true,
     };
   }
 
@@ -258,6 +264,7 @@ export class ProjectController {
           },
           model: deploymentName,
           name: 'Azure',
+          supportsImages: true,
         };
       }
 
@@ -271,6 +278,7 @@ export class ProjectController {
           'api-key': azureKey,
         },
         name: 'Azure',
+        supportsImages: true,
       };
     }
 
@@ -570,6 +578,19 @@ Nota: Se a dimensão não está cotada, use null:
     maxTokens: number,
     attempt: number = 0,
   ): Promise<string | null> {
+    const requiresImages = messages.some((message) =>
+      Array.isArray(message?.content) && message.content.some((part: any) => part?.type === 'image_url'),
+    );
+    if (requiresImages && !cfg.supportsImages) {
+      const visualProvider = this.getVisionConfig(true);
+      if (!visualProvider) {
+        console.error('[AI Reader] A folha exige visao, mas nenhum provedor com suporte a imagem esta disponivel.');
+        return null;
+      }
+      console.log(`[AI Reader] ${cfg.name || 'Provedor atual'} e somente texto; usando ${visualProvider.name || 'provedor visual'} para esta folha.`);
+      return this.callVision(visualProvider, messages, maxTokens, attempt);
+    }
+
     const isNewModel = cfg.model && (
       cfg.model.startsWith('gpt-5') ||
       cfg.model.startsWith('o1') ||
@@ -600,7 +621,7 @@ Nota: Se a dimensão não está cotada, use null:
 
     // Provedor já marcado como morto nesta sessão → troca antes mesmo de tentar
     if (this.deadProviders.has(cfg.apiUrl)) {
-      const alive = this.getVisionConfig();
+      const alive = this.getVisionConfig(requiresImages);
       if (!alive) return null;
       if (alive.apiUrl !== cfg.apiUrl) return this.callVision(alive, messages, maxTokens, attempt);
     }
@@ -623,7 +644,7 @@ Nota: Se a dimensão não está cotada, use null:
         // Quota esgotada ou credencial inválida → FAILOVER imediato para o próximo provedor
         if (/insufficient_quota|billing|account is not active/i.test(errBody)) {
           this.deadProviders.add(cfg.apiUrl);
-          const next = this.getVisionConfig();
+          const next = this.getVisionConfig(requiresImages);
           if (next && next.apiUrl !== cfg.apiUrl) {
             console.warn(`[AI Reader] ${cfg.name || 'provedor'} SEM QUOTA — failover para ${next.name || 'alternativo'}.`);
             return this.callVision(next, messages, maxTokens, 0);
@@ -649,7 +670,7 @@ Nota: Se a dimensão não está cotada, use null:
       // 401/403: credencial inválida → failover
       if (response.status === 401 || response.status === 403) {
         this.deadProviders.add(cfg.apiUrl);
-        const next = this.getVisionConfig();
+        const next = this.getVisionConfig(requiresImages);
         if (next && next.apiUrl !== cfg.apiUrl) {
           console.warn(`[AI Reader] ${cfg.name || 'provedor'} credencial inválida (${response.status}) — failover para ${next.name}.`);
           return this.callVision(next, messages, maxTokens, 0);
