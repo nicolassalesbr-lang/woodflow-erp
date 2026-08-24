@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
-import { buildProjectInterpretation, ProjectSourceFile } from './project-interpretation.engine';
+import { buildProjectInterpretation, dimensionSemanticConflict, ProjectSourceFile } from './project-interpretation.engine';
 import { buildEngineeringResult } from './engineering-pricing.engine';
 
 /**
@@ -362,22 +362,23 @@ REGRA DE CONFIABILIDADE (CRÍTICA — NUNCA VIOLE)
 - Para imagens 3D / renders / perspectivas SEM cotas numericas: retorne os moveis planejados visiveis com width/height/depth null e observacoes claras. Eles sao pendencias visuais, nao medidas de orcamento.
 - A confiabilidade do orçamento depende 100% de medidas reais dos documentos.
 
-Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+----------------------------------------------------------------
 LEITURA GEOMETRICA DE PRANCHAS EXECUTIVAS
 - Antes de extrair moveis, leia o carimbo: ambiente, nome da vista, numero da folha e escala. Agrupe todas as folhas do mesmo ambiente, mesmo quando nao forem consecutivas.
 - Em pranchas arquitetonicas brasileiras, numeros isolados sobre linhas de cota estao em CENTIMETROS quando nao houver outra unidade explicita. Normalize para milimetros: 518 = 5180 mm; 65 = 650 mm; 4 = 40 mm. Textos com unidade explicita seguem a unidade escrita.
 - Ignore como medidas do movel: escala 1:25/1:50, numero da folha, data, CAU, temperatura de LED (3000K), numeros de perspectiva, codigo de produto e cotas marcadas como regiao=carimbo.
 - Planta/layout fornece largura e profundidade. Vista frontal fornece largura e altura. Vista lateral/corte fornece profundidade e altura. Una essas vistas pelo ambiente, nome VISTA 01/02/03, posicao e descricao do mesmo conjunto.
 - Cadeias externas de cotas representam dimensoes totais. Cadeias internas representam a divisao em modulos. Associe cada segmento ao retangulo delimitado pelas linhas de extensao; nao use o numero apenas por proximidade textual.
+- Diferencie a cota do AMBIENTE da cota do MOVEL. Pe-direito, largura total da parede, circulacao e dimensoes do comodo nunca viram L/A/P do movel sem linhas de extensao que terminem no contorno desse movel.
+- Diferencie VAO de ELETRO e MODULO. As cotas do espaco da geladeira, forno, micro-ondas, lava-loucas ou adega descrevem um vazio; use-as apenas na observacao do armario que contem o vao. A largura externa vem da cadeia que limita o corpo inteiro do armario.
+- Em vista frontal, rodape, negativo, tampo e folgas podem compor uma cota total do piso ao teto. Para height use a cota externa do corpo fabricado; nao use automaticamente o pe-direito do ambiente.
+- Em moveis em L ou U, separe os trechos por parede quando cada trecho tem largura propria. A dimensao longitudinal da outra parede nao e profundidade; depth e a cota curta perpendicular ao corpo do armario.
+- Se a folha tiver apenas perspectiva/render, nao use cotas de uma folha vizinha sem identidade clara de ambiente, vista e posicao.
 - Portas, basculantes, gavetas, prateleiras, nichos e espacos de eletro sao componentes internos. Nao os transforme em moveis independentes quando pertencem a um unico balcao, aereo, torre ou ilha.
 - Extraia um item por modulo de marcenaria fabricavel. A descricao deve registrar quantidade/tipo de portas, gavetas, nichos, material, ferragem e a origem das dimensoes.
+- Quando nao houver codigo, use codigo null. Nunca use "sem codigo" ou "vazio" como identidade, pois varios moveis podem nao ter codigo na mesma folha.
 - Se uma folha de observacoes tiver clientes diferentes dos clientes do projeto, nao use essa folha para criar ou dimensionar moveis.
 
-MÃƒÅ¡LTIPLOS DOCUMENTOS DO MESMO PROJETO
-Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
-- O projeto pode conter vÃƒÂ¡rios documentos: pranchas executivas com cotas, renders 3D, fotos de referÃƒÂªncia.
-- Cada folha/imagem serÃƒÂ¡ enviada individualmente. Extraia o que for possÃƒÂ­vel de cada uma.
-═══════════════════════════════════════════════════════════════════
 MÚLTIPLOS DOCUMENTOS DO MESMO PROJETO
 ═══════════════════════════════════════════════════════════════════
 - O projeto pode conter vários documentos: pranchas executivas com cotas, renders 3D, fotos de referência.
@@ -396,7 +397,7 @@ Retorne SOMENTE um objeto JSON puro no formato:
       "environment": "Cozinha|Suíte|Banheiro|Dormitório|Sala",
       "itemType": "Balcão|Aéreo|Torre|Bancada|Guarda-Roupa|Painel|Cama|Mesa|Penteadeira",
       "description": "Nome legível do móvel montado (ex: Armário Aéreo sobre Pia com 3 portas)",
-      "codigo": "A|B|C|1|2|vazio",
+      "codigo": "A|B|C|1|2|null",
       "width": 1274,
       "height": 600,
       "depth": 350,
@@ -499,7 +500,9 @@ Nota: Se a dimensão não está cotada, use null:
     if (leftTargetId && rightTargetId && leftTargetId === rightTargetId) return true;
     const leftCode = this.normKey(String(left.codigo || ''));
     const rightCode = this.normKey(String(right.codigo || ''));
-    if (leftCode && rightCode && leftCode === rightCode && this.normKey(left.environment) === this.normKey(right.environment)) return true;
+    const meaningfulCode = (code: string) => Boolean(code && !/^(sem codigo|vazio|nao identificado|null|n\/a)$/.test(code));
+    if (meaningfulCode(leftCode) && meaningfulCode(rightCode) && leftCode === rightCode
+      && this.normKey(left.environment) === this.normKey(right.environment)) return true;
     const sameEnvironment = this.normKey(left.environment) === this.normKey(right.environment);
     const leftText = this.normKey(`${left.description || ''} ${left.itemType || ''}`);
     const rightText = this.normKey(`${right.description || ''} ${right.itemType || ''}`);
@@ -511,19 +514,27 @@ Nota: Se a dimensão não está cotada, use null:
     if (!matches.length) return null;
     const original = this.sourceItemFromInterpretation(target);
     const merged = { ...original, ...matches[0] };
+    const correctedAxes: string[] = [];
     for (const axis of ['width', 'height', 'depth'] as const) {
       const originalValue = Number(original[axis]) || 0;
-      if (originalValue > 0) {
-        merged[axis] = originalValue;
-        continue;
-      }
       const candidates = Array.from(new Set(matches
         .map((item) => Number(item[axis]) || 0)
         .filter((value) => value > 0)));
-      // Conflicting readings remain pending instead of selecting an arbitrary cota.
-      merged[axis] = candidates.length === 1 ? candidates[0] : 0;
+      if (candidates.length === 1) {
+        merged[axis] = candidates[0];
+        if (originalValue > 0 && originalValue !== candidates[0]) {
+          correctedAxes.push(`${axis}: ${originalValue} -> ${candidates[0]} mm`);
+        }
+      } else if (candidates.length > 1) {
+        // Conflicting readings remain pending instead of selecting an arbitrary
+        // cota or preserving a possibly wrong value from the first pass.
+        merged[axis] = 0;
+      } else {
+        merged[axis] = originalValue;
+      }
     }
-    merged.observacoes = `${matches.map((item) => item.observacoes).filter(Boolean).join(' | ') || original.observacoes || ''} | Revisao dirigida do PDF.`.trim();
+    const correctionNote = correctedAxes.length ? `Correcoes da revisao: ${correctedAxes.join(', ')}.` : '';
+    merged.observacoes = `${matches.map((item) => item.observacoes).filter(Boolean).join(' | ') || original.observacoes || ''} | ${correctionNote} Revisao dirigida do PDF.`.trim();
     merged.reviewTargetId = target.id;
     return merged;
   }
@@ -975,9 +986,9 @@ Nota: Se a dimensão não está cotada, use null:
       userContent.push({
         type: 'text',
         text:
-          `\n\nDADOS ESTRUTURADOS DESTA FOLHA (extraídos por OCR/layout do Azure Document Intelligence). ` +
-          `O OCR pode cometer erros ou omitir textos verticais/pequenos. Se você ler uma cota claramente na imagem, CONFIE NA SUA VISÃO, mesmo que ela não apareça no OCR. Use o OCR apenas como guia espacial ` +
-          `(pela proximidade das posições x,y). Ainda assim aplique a regra cm→mm (×10). ` +
+          `\n\nDADOS ESTRUTURADOS DESTA FOLHA. Entradas marcadas fonte=pdf_vetorial vieram diretamente dos glifos do PDF e preservam valor e coordenada; trate-as como evidencia exata. ` +
+          `Entradas OCR podem cometer erros. Use as posicoes x,y e os BLOCOS VETORIAIS POSICIONADOS para distinguir vista, modulo, vao, ambiente e carimbo; proximidade isolada nao prova associacao. ` +
+          `Aplique a regra cm->mm (x10) somente a cotas do desenho. ` +
           `Se uma medida NÃO estiver escrita no desenho, use null; nunca registre medida estimada da sua cabeça. ` +
           `Para evitar JSON longo/truncado, priorize no maximo 12 MOVEIS MONTADOS desta folha e ignore subpecas. ` +
           `Não use as palavras "assumida", "estimada" ou "aproximada": cada width/height/depth precisa vir de cota visivel ou texto OCR.\n\n${structuredContext}`,
@@ -1193,31 +1204,82 @@ Nota: Se a dimensão não está cotada, use null:
     }
     for (const it of items) it.environment = envCanon.get(this.normKey(it.environment)) || it.environment;
 
+    const meaningfulCode = (value: any): string => {
+      const code = this.normKey(String(value || ''));
+      return code && !/^(sem codigo|vazio|nao identificado|null|n\/a)$/.test(code) ? code : '';
+    };
+
+    // First remove exact repetitions. Description is part of the identity:
+    // two cabinets with the same type/material/dimensions can still be distinct
+    // modules. Repeated views do not increase physical quantity.
     const map = new Map<string, any>();
     for (const it of items) {
       const key = [
         it.reviewTargetId || '',
         this.normKey(it.environment),
-        (it.itemType || '').toLowerCase().trim(),
-        (it.materialType || '').toLowerCase().trim(),
+        this.normKey(it.itemType || ''),
+        meaningfulCode(it.codigo),
+        this.normKey(it.description || ''),
         Math.round((it.width || 0) / 10),   // tolerância de 1cm
         Math.round((it.height || 0) / 10),
         Math.round((it.depth || 0) / 10),
-        (it.width || 0) + (it.height || 0) + (it.depth || 0) === 0 ? this.normKey(it.description) : '',
       ].join('|');
       const ex = map.get(key);
       if (ex) {
-        ex.quantity += it.quantity || 1;
+        ex.quantity = Math.max(ex.quantity || 1, it.quantity || 1);
         if ((it.description || '').length > (ex.description || '').length) ex.description = it.description;
         if ((it.observacoes || '').length > (ex.observacoes || '').length) ex.observacoes = it.observacoes;
         if (!ex.codigo && it.codigo) ex.codigo = it.codigo;
         if (!ex.acabamento && it.acabamento) ex.acabamento = it.acabamento;
+        if ((!ex.materialType || this.normKey(ex.materialType) === 'mdf 18mm') && it.materialType) ex.materialType = it.materialType;
       } else {
         map.set(key, { ...it });
       }
     }
-    // Recalcula área/volume com a quantidade consolidada
-    const out = Array.from(map.values());
+
+    // Then merge complementary views only when every non-zero axis agrees.
+    // A conflict keeps both readings visible for review instead of constructing
+    // a false LxAxP from unrelated cotas.
+    const identityGroups = new Map<string, any[]>();
+    for (const item of map.values()) {
+      const identity = [
+        item.reviewTargetId || '',
+        this.normKey(item.environment),
+        this.normKey(item.itemType || ''),
+        meaningfulCode(item.codigo),
+        this.normKey(item.description || ''),
+      ].join('|');
+      identityGroups.set(identity, [...(identityGroups.get(identity) || []), item]);
+    }
+
+    const out: any[] = [];
+    for (const group of identityGroups.values()) {
+      if (group.length === 1) {
+        out.push(group[0]);
+        continue;
+      }
+      const candidates = (axis: 'width' | 'height' | 'depth') =>
+        Array.from(new Set(group.map((item) => Number(item[axis]) || 0).filter((value) => value > 0)));
+      const widths = candidates('width');
+      const heights = candidates('height');
+      const depths = candidates('depth');
+      if (widths.length > 1 || heights.length > 1 || depths.length > 1) {
+        out.push(...group);
+        continue;
+      }
+      const merged = { ...group.slice().sort((left, right) =>
+        [right.width, right.height, right.depth].filter(Boolean).length
+        - [left.width, left.height, left.depth].filter(Boolean).length,
+      )[0] };
+      merged.width = widths[0] || 0;
+      merged.height = heights[0] || 0;
+      merged.depth = depths[0] || 0;
+      merged.quantity = Math.max(...group.map((item) => item.quantity || 1));
+      merged.observacoes = Array.from(new Set(group.map((item) => item.observacoes).filter(Boolean))).join(' | ').slice(0, 500) || null;
+      out.push(merged);
+    }
+
+    // Recalcula área/volume com a quantidade consolidada.
     for (const m of out) {
       m.area = +(((m.width * m.height) / 1_000_000) * m.quantity).toFixed(3);
       m.volume = +(((m.width * m.height * m.thickness) / 1_000_000_000) * m.quantity).toFixed(4);
@@ -1509,7 +1571,10 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
 
     const targets = interpretation.environments
       .flatMap((environment: any) => environment.items || [])
-      .filter((item: any) => item.quoteStatus !== 'READY' || (item.validation?.issues || []).some((issue: any) => issue.severity === 'WARNING'));
+      .filter((item: any) => item.quoteStatus === 'PENDING_MEASUREMENTS'
+        || (item.validation?.issues || []).some((issue: any) =>
+          ['SUSPICIOUS_DIMENSION', 'DIMENSION_SEMANTIC_CONFLICT'].includes(issue.code),
+        ));
     if (!targets.length) {
       return { success: true, started: false, message: 'Nao ha pendencias ou alertas para revisar.' };
     }
@@ -1584,13 +1649,17 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
         });
       }
 
+      const targetIds = new Set(targets.map((target) => String(target.id || '')).filter(Boolean));
       const reviewed = this.dedupeItems(this.sanitizeItems(reviewItems))
-        .filter((item) => targets.some((target) => this.isSameFurniture(target, item)));
+        // A review result without the exact requested target ID is ambiguous.
+        // Description/code fallback previously mixed appliance voids, room
+        // heights and unrelated no-code cabinets from the same kitchen.
+        .filter((item) => item.reviewTargetId && targetIds.has(String(item.reviewTargetId)));
       const resolvedTargetIds: string[] = [];
       const retainedTargets = targets.map((target) => {
         const merged = this.mergeReviewedFurniture(
           target,
-          reviewed.filter((item) => this.isSameFurniture(target, item)),
+          reviewed.filter((item) => String(item.reviewTargetId) === String(target.id)),
         );
         if (!merged) return this.sourceItemFromInterpretation(target);
         if (merged.width > 0 && merged.height > 0 && merged.depth > 0) resolvedTargetIds.push(target.id);
@@ -1601,7 +1670,9 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
         .filter((item: any) => !targets.some((target) => this.isSameFurniture(target, item)))
         .map((item: any) => ({ ...item }));
       const consolidated = this.dedupeItems(this.sanitizeItems([...untouchedItems, ...retainedTargets]));
-      const quoteReadyItems = consolidated.filter((item) => item.width > 0 && item.height > 0 && item.depth > 0);
+      const quoteReadyItems = consolidated.filter((item) =>
+        item.width > 0 && item.height > 0 && item.depth > 0 && !dimensionSemanticConflict(item),
+      );
       const nextInterpretation: any = buildProjectInterpretation(consolidated, sourceFiles);
       nextInterpretation.review = {
         mode: 'targeted_pdf_review_v1',
@@ -1847,7 +1918,9 @@ Use milímetros para TODAS as dimensões e coordenadas X, Y, Z. Não simplifique
       const sanitized = this.sanitizeItems(allRawItems);
       const deduplicated = this.dedupeItems(sanitized);
       const interpretation = buildProjectInterpretation(deduplicated, sourceFiles);
-      const quoteReadyItems = deduplicated.filter((item) => item.width > 0 && item.height > 0 && item.depth > 0);
+      const quoteReadyItems = deduplicated.filter((item) =>
+        item.width > 0 && item.height > 0 && item.depth > 0 && !dimensionSemanticConflict(item),
+      );
       isRealParsing = deduplicated.length > 0;
       console.log(`[Interpretation] ${interpretation.summary.furnitureItems} movel(is), ${interpretation.summary.readyToQuote} pronto(s), ${interpretation.summary.pendingMeasurements} pendente(s), status=${interpretation.validation.status}.`);
       console.log(`[AI Reader] Batch consolidado: ${allRawItems.length} raw → ${sanitized.length} sanitized → ${deduplicated.length} deduplicated → ${quoteReadyItems.length} quote-ready item(s).`);

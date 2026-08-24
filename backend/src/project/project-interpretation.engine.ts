@@ -55,6 +55,7 @@ export type ProjectInterpretation = {
   summary: {
     environments: number;
     furnitureItems: number;
+    completeMeasurements: number;
     readyToQuote: number;
     pendingMeasurements: number;
     blockers: number;
@@ -108,13 +109,53 @@ function toNullableDimension(value: unknown): number | null {
 function itemId(item: any, index: number): string {
   const env = norm(item.environment || 'ambiente').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const type = norm(item.itemType || 'movel').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const code = norm(item.codigo || '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  return [env || 'ambiente', type || 'movel', code || String(index + 1).padStart(2, '0')].join('-');
+  const rawCode = norm(item.codigo || '');
+  const meaningfulCode = rawCode && !/^(sem codigo|vazio|nao identificado|null|n\/a)$/.test(rawCode);
+  const code = meaningfulCode ? rawCode.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') : '';
+  const description = norm(item.description || '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 44);
+  // The ordinal is intentional. Executive drawings often contain several
+  // no-code cabinets of the same type; duplicate IDs made the PDF review mix
+  // dimensions belonging to different modules.
+  return [
+    env || 'ambiente',
+    type || 'movel',
+    code || description || 'sem-codigo',
+    String(index + 1).padStart(2, '0'),
+  ].join('-');
 }
 
 function isLikelyQuoteableFurniture(item: any): boolean {
   const text = norm([item.itemType, item.description, item.observacoes].filter(Boolean).join(' '));
   return QUOTEABLE_TYPES.some((token) => text.includes(token));
+}
+
+/**
+ * Reject dimension combinations that are numerically valid but conflict with
+ * the furniture type. This catches room heights assigned to base cabinets and
+ * appliance-void dimensions assigned to tall cabinets without hiding the raw
+ * evidence from the review UI.
+ */
+export function dimensionSemanticConflict(item: any): string | null {
+  const width = toNullableDimension(item.width ?? item.dimensions?.width);
+  const height = toNullableDimension(item.height ?? item.dimensions?.height);
+  const depth = toNullableDimension(item.depth ?? item.dimensions?.depth);
+  if (!width || !height || !depth) return null;
+
+  const text = norm([item.itemType, item.description].filter(Boolean).join(' '));
+  if (width > 12000 || height > 4000 || depth > 1800) {
+    return 'Dimensoes externas excedem os limites tecnicos gerais de um movel planejado.';
+  }
+  if (/\b(balcao|gabinete|base|bancada|ilha|peninsula)\b/.test(text) && (height < 300 || height > 1500)) {
+    return 'Altura incompativel com balcao, bancada ou ilha; pode ser uma cota do ambiente.';
+  }
+  if (/\b(aereo|armario superior|movel superior)\b/.test(text) && (height < 200 || height > 1800 || depth > 800)) {
+    return 'Dimensoes incompativeis com um movel aereo; conferir se a cota pertence a outro modulo.';
+  }
+  if (/\b(torre|coluna|armario alto|movel alto|roupeiro|guarda roupa|guarda-roupa)\b/.test(text)
+    && (height < 1200 || height > 3500 || width > 2000 || depth > 800)) {
+    return 'Dimensoes incompativeis com torre ou armario alto; pode ser um vao ou uma cota total da parede.';
+  }
+  return null;
 }
 
 function buildItemIssues(item: any, ref: string): ValidationIssue[] {
@@ -166,6 +207,17 @@ function buildItemIssues(item: any, ref: string): ValidationIssue[] {
       itemRef: ref,
       environment: String(item.environment || 'Ambiente'),
       message: 'Uma ou mais medidas parecem fora da faixa usual de marcenaria e devem ser conferidas.',
+    });
+  }
+
+  const semanticConflict = dimensionSemanticConflict(item);
+  if (semanticConflict) {
+    issues.push({
+      code: 'DIMENSION_SEMANTIC_CONFLICT',
+      severity: 'BLOCKER',
+      itemRef: ref,
+      environment: String(item.environment || 'Ambiente'),
+      message: semanticConflict,
     });
   }
 
@@ -221,6 +273,10 @@ export function buildProjectInterpretation(
   const blockers = issues.filter((issue) => issue.severity === 'BLOCKER').length;
   const warnings = issues.filter((issue) => issue.severity === 'WARNING').length;
   const readyToQuote = interpretedItems.filter((item) => item.quoteStatus === 'READY').length;
+  const completeMeasurements = interpretedItems.filter((item) =>
+    Boolean(item.dimensions.width && item.dimensions.height && item.dimensions.depth)
+    && !item.validation.issues.some((issue) => issue.code === 'DIMENSION_SEMANTIC_CONFLICT'),
+  ).length;
   const pendingMeasurements = interpretedItems.filter((item) => item.quoteStatus === 'PENDING_MEASUREMENTS').length;
 
   const requiredQuestions: string[] = [];
@@ -246,6 +302,7 @@ export function buildProjectInterpretation(
     summary: {
       environments: envMap.size,
       furnitureItems: interpretedItems.length,
+      completeMeasurements,
       readyToQuote,
       pendingMeasurements,
       blockers,

@@ -320,7 +320,7 @@ export default function Projects() {
     if (!Array.isArray(interpretation?.environments)) return [];
     return interpretation.environments.flatMap((environment: any) =>
       (environment.items || [])
-        .filter((item: any) => item.quoteStatus !== 'READY')
+        .filter((item: any) => item.quoteStatus === 'PENDING_MEASUREMENTS')
         .map((item: any) => ({
           id: `pending-${item.id}`,
           environment: item.environment || environment.name || 'Ambiente',
@@ -353,7 +353,10 @@ export default function Projects() {
   const interpretation = selectedProj?.digitalTwin?.interpretation;
   const reviewableItems = (interpretation?.environments || [])
     .flatMap((environment: any) => environment.items || [])
-    .filter((item: any) => item.quoteStatus !== "READY" || (item.validation?.issues || []).some((issue: any) => issue.severity === "WARNING"));
+    .filter((item: any) => item.quoteStatus === "PENDING_MEASUREMENTS"
+      || (item.validation?.issues || []).some((issue: any) =>
+        ["SUSPICIOUS_DIMENSION", "DIMENSION_SEMANTIC_CONFLICT"].includes(issue.code),
+      ));
   const hasStoredSourceDocuments = Boolean(selectedProj?.digitalTwin?.sourceDocuments?.length);
   const engineering = budget?.engineering || selectedProj?.digitalTwin?.engineering || null;
   
@@ -2082,8 +2085,8 @@ export default function Projects() {
                         </div>
                         <div className="grid w-full grid-cols-3 gap-2 text-center sm:w-auto sm:min-w-[320px]">
                           <div className="rounded-lg border border-[#e8d4b8]/12 bg-[#100b08]/55 px-3 py-2">
-                            <p className="text-lg font-black text-[#fff8f0]">{interpretation.summary?.readyToQuote || 0}</p>
-                            <p className="text-[10px] uppercase tracking-[0.12em] text-[#a99680]">prontos</p>
+                            <p className="text-lg font-black text-[#fff8f0]">{interpretation.summary?.completeMeasurements ?? selectedItems.length ?? 0}</p>
+                            <p className="text-[10px] uppercase tracking-[0.12em] text-[#a99680]">medidas completas</p>
                           </div>
                           <div className="rounded-lg border border-[#e8d4b8]/12 bg-[#100b08]/55 px-3 py-2">
                             <p className="text-lg font-black text-[#fff8f0]">{interpretation.summary?.pendingMeasurements || 0}</p>

@@ -87,19 +87,27 @@ def _page_context(
         re.IGNORECASE,
     )]
     dimensions = []
+    positioned_blocks = []
     if native_blocks:
         native_width = native_width or max((block["bbox"][2] for block in native_blocks), default=1)
         native_height = native_height or max((block["bbox"][3] for block in native_blocks), default=1)
         for block in native_blocks:
-            if not _looks_like_measurement(block["text"]):
-                continue
             x1, y1, x2, y2 = block["bbox"]
             direction = block.get("direction") or (1.0, 0.0)
             orientation = "vertical" if abs(direction[1]) > abs(direction[0]) else "horizontal"
+            normalized_x = ((x1 + x2) / 2) / native_width
             normalized_y = ((y1 + y2) / 2) / native_height
             region = "carimbo" if normalized_y > 0.82 else "desenho"
+            clean_text = re.sub(r"\s+", " ", block["text"]).replace("|", "/").strip()
+            if clean_text and region == "desenho":
+                positioned_blocks.append(
+                    f'"{clean_text[:140]}"@({normalized_x:.3f},{normalized_y:.3f});'
+                    f'orient={orientation};fonte=pdf_vetorial'
+                )
+            if not _looks_like_measurement(block["text"]):
+                continue
             dimensions.append(
-                f'{block["text"]}@({((x1 + x2) / 2) / native_width:.3f},'
+                f'{block["text"]}@({normalized_x:.3f},'
                 f'{normalized_y:.3f});conf=1.00;orient={orientation};'
                 f'regiao={region};fonte=pdf_vetorial'
             )
@@ -124,11 +132,16 @@ def _page_context(
             "COTAS COM POSICAO/CONFIANCA (numeros sem unidade nas linhas de cota estao em cm):\n"
             + " | ".join(dimensions[:240])
         )
+    if positioned_blocks:
+        parts.append(
+            "BLOCOS VETORIAIS POSICIONADOS (texto@(x,y); use para associar cada cota ao contorno/vista correto):\n"
+            + " | ".join(positioned_blocks[:320])
+        )
     if native_text:
         parts.append("TEXTO VETORIAL:\n" + " | ".join(native_text)[:5000])
     if ocr_text:
         parts.append("TEXTO OCR VISUAL:\n" + " | ".join(ocr_text)[:5000])
-    return "\n\n".join(parts)[:14000]
+    return "\n\n".join(parts)[:24000]
 
 @app.post("/analyze", response_model=OCRResponse)
 async def analyze_document(file: UploadFile = File(...)):
