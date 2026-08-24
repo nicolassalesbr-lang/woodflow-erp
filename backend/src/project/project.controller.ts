@@ -663,7 +663,13 @@ Nota: Se a dimensão não está cotada, use null:
           await new Promise((r) => setTimeout(r, waitMs));
           return this.callVision(cfg, messages, maxTokens, attempt + 1);
         }
-        console.error('[AI Reader] Rate limit persistente após 5 tentativas:', errBody.substring(0, 200));
+        this.deadProviders.add(cfg.apiUrl);
+        const next = this.getVisionConfig(requiresImages);
+        if (next && next.apiUrl !== cfg.apiUrl) {
+          console.warn(`[AI Reader] Rate limit persistente em ${cfg.name || 'provedor'}; failover para ${next.name || 'alternativo'}.`);
+          return this.callVision(next, messages, maxTokens, 0);
+        }
+        console.error('[AI Reader] Rate limit persistente após 5 tentativas e sem provedor alternativo:', errBody.substring(0, 200));
         return null;
       }
 
@@ -680,6 +686,14 @@ Nota: Se a dimensão não está cotada, use null:
 
       if (!response.ok) {
         const errText = await response.text();
+        if (response.status === 400 && /does not support image|unknown variant.*image_url|expected.*text/i.test(errText)) {
+          this.deadProviders.add(cfg.apiUrl);
+          const next = this.getVisionConfig(requiresImages);
+          if (next && next.apiUrl !== cfg.apiUrl) {
+            console.warn(`[AI Reader] ${cfg.name || 'Provedor'} rejeitou imagem; failover para ${next.name || 'alternativo'}.`);
+            return this.callVision(next, messages, maxTokens, 0);
+          }
+        }
         console.error('[AI Reader] Vision request failed:', response.status, errText.substring(0, 300));
         return null;
       }
