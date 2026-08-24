@@ -582,6 +582,43 @@ Nota: Se a dimensão não está cotada, use null:
     return nearby.length ? nearby : targets;
   }
 
+  private hasStructuredPageEvidence(messages: any[]): boolean {
+    const text = messages.flatMap((message) =>
+      Array.isArray(message?.content)
+        ? message.content.filter((part: any) => part?.type === 'text').map((part: any) => String(part.text || ''))
+        : [String(message?.content || '')],
+    ).join('\n');
+    return text.length > 500 && /OCR\/layout desta folha|DADOS ESTRUTURADOS DESTA FOLHA|COTAS COM POSICAO/i.test(text);
+  }
+
+  private withoutImageParts(messages: any[]): any[] {
+    return messages.map((message) => {
+      if (!Array.isArray(message?.content)) return message;
+      // Text-only providers are stricter than OpenAI's multimodal schema: send a
+      // plain string instead of leaving a one-element content-parts array.
+      const textContent = message.content
+        .filter((part: any) => part?.type !== 'image_url')
+        .map((part: any) => part?.type === 'text' ? String(part.text || '') : '')
+        .filter(Boolean)
+        .join('\n');
+      return { ...message, content: textContent };
+    });
+  }
+
+  private async callStructuredTextFallback(
+    messages: any[],
+    maxTokens: number,
+    attempt: number = 0,
+  ): Promise<string | null> {
+    if (!this.hasStructuredPageEvidence(messages)) return null;
+    const textProvider = this.getVisionConfigs().find((provider) =>
+      !provider.supportsImages && !this.deadProviders.has(provider.apiUrl),
+    );
+    if (!textProvider) return null;
+    console.log(`[AI Reader] Usando ${textProvider.name || 'provedor textual'} com contexto OCR/vetorial completo da folha.`);
+    return this.callVision(textProvider, this.withoutImageParts(messages), maxTokens, attempt);
+  }
+
   private async callVision(
     cfg: VisionConfig,
     messages: any[],
@@ -591,10 +628,17 @@ Nota: Se a dimensão não está cotada, use null:
     const requiresImages = messages.some((message) =>
       Array.isArray(message?.content) && message.content.some((part: any) => part?.type === 'image_url'),
     );
+    const preferStructuredText = process.env.VISION_PREFER_STRUCTURED_TEXT === 'true';
+    if (requiresImages && preferStructuredText && this.hasStructuredPageEvidence(messages)) {
+      const textResult = await this.callStructuredTextFallback(messages, maxTokens, attempt);
+      if (textResult) return textResult;
+    }
     if (requiresImages && !cfg.supportsImages) {
       const visualProvider = this.getVisionConfig(true);
       if (!visualProvider) {
-        console.error('[AI Reader] A folha exige visao, mas nenhum provedor com suporte a imagem esta disponivel.');
+        const textResult = await this.callStructuredTextFallback(messages, maxTokens, attempt);
+        if (textResult) return textResult;
+        console.error('[AI Reader] A folha exige visao, mas nenhum provedor visual ou contexto estruturado esta disponivel.');
         return null;
       }
       console.log(`[AI Reader] ${cfg.name || 'Provedor atual'} e somente texto; usando ${visualProvider.name || 'provedor visual'} para esta folha.`);
@@ -679,6 +723,8 @@ Nota: Se a dimensão não está cotada, use null:
           console.warn(`[AI Reader] Rate limit persistente em ${cfg.name || 'provedor'}; failover para ${next.name || 'alternativo'}.`);
           return this.callVision(next, messages, maxTokens, 0);
         }
+        const textResult = await this.callStructuredTextFallback(messages, maxTokens, 0);
+        if (textResult) return textResult;
         console.error('[AI Reader] Rate limit persistente após 5 tentativas e sem provedor alternativo:', errBody.substring(0, 200));
         return null;
       }
@@ -703,6 +749,8 @@ Nota: Se a dimensão não está cotada, use null:
             console.warn(`[AI Reader] ${cfg.name || 'Provedor'} rejeitou imagem; failover para ${next.name || 'alternativo'}.`);
             return this.callVision(next, messages, maxTokens, 0);
           }
+          const textResult = await this.callStructuredTextFallback(messages, maxTokens, 0);
+          if (textResult) return textResult;
         }
         console.error('[AI Reader] Vision request failed:', response.status, errText.substring(0, 300));
         return null;
