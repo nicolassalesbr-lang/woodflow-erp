@@ -407,8 +407,8 @@ Nota: Se a dimensÃƒÂ£o nÃƒÂ£o estÃƒÂ¡ cotada, use null:
       ].filter(Boolean).join(', ') || 'validar medidas';
       const objectives = brief.objectives?.join(' ') || target.validation?.issues?.map((issue: any) => issue.message).join(' ') || 'Conferir medidas e material.';
       const evidence = String(brief.evidenceSummary || target.evidence?.notes || target.evidence?.sourceText || '').replace(/\s+/g, ' ').slice(0, 420);
-      return `${index + 1}. Ambiente: ${target.environment || 'Ambiente'}\n   Movel: ${target.description || target.itemType || 'Movel'} | codigo: ${target.codigo || 'sem codigo'}\n   Ja confirmado: ${confirmed}\n   Falta validar: ${missing}\n   Objetivo: ${objectives}\n   Folha de origem: ${brief.sourcePage || target.evidence?.sourcePage || 'nao identificada'}\n   Evidencia anterior: ${evidence || 'nenhuma - localizar diretamente na prancha'}`;
-    }).join('\n');
+      return `${index + 1}. reviewTargetId: ${target.id}\n   Ambiente: ${target.environment || 'Ambiente'}\n   Movel: ${target.description || target.itemType || 'Movel'} | codigo: ${target.codigo || 'sem codigo'}\n   Ja confirmado: ${confirmed}\n   Falta validar: ${missing}\n   Objetivo: ${objectives}\n   Folha de origem: ${brief.sourcePage || target.evidence?.sourcePage || 'nao identificada'}\n   Evidencia anterior: ${evidence || 'nenhuma - localizar diretamente na prancha'}`;
+    }).join('\n') + '\n\nREGRA DE IDENTIDADE: em cada item retornado, inclua "reviewTargetId" copiando exatamente o identificador do item-alvo correspondente.';
 
     return `${this.buildSystemPrompt()}\n\nMODO REVISAO DIRIGIDA DO PDF\nVoce esta revisando APENAS os moveis abaixo, pois ficaram pendentes ou com alerta na primeira leitura. Leia com maximo cuidado as cotas, setas, vistas e texto OCR relacionados a eles.\n\nITENS-ALVO:\n${targetList}\n\nREGRAS ADICIONAIS:\n- Retorne SOMENTE itens que correspondam claramente a um dos itens-alvo; nao crie novos moveis.\n- Para cada dimensao, use somente uma cota explicitamente visivel/escrita no PDF. Converta cm para mm quando aplicavel.\n- Se uma medida nao puder ser associada sem ambiguidade ao movel, mantenha null e explique em observacoes.\n- Em observacoes, registre a origem da cota de forma curta, por exemplo: \"Evidencia: L 1274 mm na vista frontal, A 600 mm, P 350 mm no corte\". Quando houver pendencia, diga exatamente qual vista/cota nao foi localizada.\n- Leia as vistas frontal, lateral, corte e planta como fontes complementares do MESMO movel. Pode completar L, A e P usando vistas diferentes, desde que codigo, posicao ou desenho confirmem que pertencem ao mesmo modulo.\n- Use medidas parciais ja confirmadas como ancora. Nao substitua uma medida confirmada por outra sem explicar a divergencia em observacoes.\n- Nao estime medidas por proporcao, padrao de marcenaria, eletrodomestico ou render.\n- Preserve o ambiente, codigo e descricao quando estiverem identificaveis.`;
   }
@@ -456,10 +456,14 @@ Nota: Se a dimensÃƒÂ£o nÃƒÂ£o estÃƒÂ¡ cotada, use null:
       source: item.evidence?.source,
       sourcePage: item.evidence?.sourcePage,
       sourceText: item.evidence?.sourceText,
+      reviewTargetId: item.id,
     };
   }
 
   private isSameFurniture(left: any, right: any): boolean {
+    const leftTargetId = String(left.reviewTargetId || left.id || '').trim();
+    const rightTargetId = String(right.reviewTargetId || '').trim();
+    if (leftTargetId && rightTargetId && leftTargetId === rightTargetId) return true;
     const leftCode = this.normKey(String(left.codigo || ''));
     const rightCode = this.normKey(String(right.codigo || ''));
     if (leftCode && rightCode && leftCode === rightCode && this.normKey(left.environment) === this.normKey(right.environment)) return true;
@@ -467,6 +471,28 @@ Nota: Se a dimensÃƒÂ£o nÃƒÂ£o estÃƒÂ¡ cotada, use null:
     const leftText = this.normKey(`${left.description || ''} ${left.itemType || ''}`);
     const rightText = this.normKey(`${right.description || ''} ${right.itemType || ''}`);
     return sameEnvironment && Boolean(leftText && rightText) && (leftText.includes(rightText) || rightText.includes(leftText));
+  }
+
+  /** Combine complementary dimensions found in front, plan and section views. */
+  private mergeReviewedFurniture(target: any, matches: any[]): any | null {
+    if (!matches.length) return null;
+    const original = this.sourceItemFromInterpretation(target);
+    const merged = { ...original, ...matches[0] };
+    for (const axis of ['width', 'height', 'depth'] as const) {
+      const originalValue = Number(original[axis]) || 0;
+      if (originalValue > 0) {
+        merged[axis] = originalValue;
+        continue;
+      }
+      const candidates = Array.from(new Set(matches
+        .map((item) => Number(item[axis]) || 0)
+        .filter((value) => value > 0)));
+      // Conflicting readings remain pending instead of selecting an arbitrary cota.
+      merged[axis] = candidates.length === 1 ? candidates[0] : 0;
+    }
+    merged.observacoes = `${matches.map((item) => item.observacoes).filter(Boolean).join(' | ') || original.observacoes || ''} | Revisao dirigida do PDF.`.trim();
+    merged.reviewTargetId = target.id;
+    return merged;
   }
 
   /**
@@ -1174,6 +1200,7 @@ ${JSON.stringify(compactItems).slice(0, 18000)}`,
         sourceMediaType: raw.sourceMediaType || null,
         sourcePage: raw.sourcePage || null,
         sourceText: raw.sourceText ? String(raw.sourceText).substring(0, 1200) : null,
+        reviewTargetId: raw.reviewTargetId ? String(raw.reviewTargetId).substring(0, 191) : null,
       });
     }
     return out;
@@ -1209,6 +1236,7 @@ ${JSON.stringify(compactItems).slice(0, 18000)}`,
     const map = new Map<string, any>();
     for (const it of items) {
       const key = [
+        it.reviewTargetId || '',
         this.normKey(it.environment),
         (it.itemType || '').toLowerCase().trim(),
         (it.materialType || '').toLowerCase().trim(),
@@ -1600,17 +1628,11 @@ Use milÃƒÂ­metros para TODAS as dimensÃƒÂµes e coordenadas X, Y, Z. NÃ�
         .filter((item) => targets.some((target) => this.isSameFurniture(target, item)));
       const resolvedTargetIds: string[] = [];
       const retainedTargets = targets.map((target) => {
-        const reviewedMatch = reviewed.find((item) => this.isSameFurniture(target, item));
-        if (!reviewedMatch) return this.sourceItemFromInterpretation(target);
-        const original = this.sourceItemFromInterpretation(target);
-        const merged = {
-          ...original,
-          ...reviewedMatch,
-          width: reviewedMatch.width || original.width || 0,
-          height: reviewedMatch.height || original.height || 0,
-          depth: reviewedMatch.depth || original.depth || 0,
-          observacoes: `${reviewedMatch.observacoes || original.observacoes || ''} | Revisao dirigida do PDF.`.trim(),
-        };
+        const merged = this.mergeReviewedFurniture(
+          target,
+          reviewed.filter((item) => this.isSameFurniture(target, item)),
+        );
+        if (!merged) return this.sourceItemFromInterpretation(target);
         if (merged.width > 0 && merged.height > 0 && merged.depth > 0) resolvedTargetIds.push(target.id);
         return merged;
       });

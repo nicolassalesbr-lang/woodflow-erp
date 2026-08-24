@@ -116,6 +116,16 @@ Um móvel somente poderá receber `READY` quando as dimensões obrigatórias par
 - As folhas são processadas sequencialmente para evitar consumo excessivo de memória em projetos A3 extensos.
 - Validação local: sintaxe Python e filtro de cotas aprovados; teste completo do PaddleOCR depende do runtime da VPS, onde estão os modelos e dependências.
 
+#### 2026-08-24 — Associação determinística e consolidação entre vistas
+
+- Cada móvel pendente recebe um `reviewTargetId` estável, exigido na resposta da revisão, eliminando a dependência primária de descrições reescritas pela IA.
+- O identificador de revisão é preservado na sanitização e na deduplicação.
+- Resultados complementares da elevação, planta e corte são consolidados por eixo antes da validação.
+- Uma dimensão original já confirmada nunca é substituída silenciosamente.
+- Leituras conflitantes para o mesmo eixo permanecem pendentes, em vez de escolher um valor arbitrário.
+- O casamento textual anterior permanece apenas como fallback para provedores que não devolvam o identificador.
+- Validação: TypeScript sem erros no backend e frontend.
+
 - [x] Auditar contratos atuais e identificar lacunas.
 - [x] Definir contrato-alvo e estados de evidência.
 - [ ] Criar tipos e schema de validação compartilhados.
