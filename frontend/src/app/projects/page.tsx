@@ -20,7 +20,10 @@ import {
   Pencil,
   Save,
   X,
-  Loader2
+  Loader2,
+  Eye,
+  FileText,
+  Image as ImageIcon
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { getApiUrl } from '../../utils/api';
@@ -51,6 +54,16 @@ interface Face3D {
   offset: Point3D;
   item: any;
 }
+
+type ProjectDocument = {
+  id: string;
+  filename: string;
+  mimeType: string;
+  pages?: number | null;
+  available: boolean;
+  viewable: boolean;
+  sizeBytes?: number | null;
+};
 
 // 2D Nesting structures
 interface PackedRect {
@@ -269,6 +282,13 @@ export default function Projects() {
   const [newProjName, setNewProjName] = useState("");
   const [newProjDesc, setNewProjDesc] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
+  const [documentViewerOpen, setDocumentViewerOpen] = useState(false);
+  const [projectDocuments, setProjectDocuments] = useState<ProjectDocument[]>([]);
+  const [activeDocument, setActiveDocument] = useState<ProjectDocument | null>(null);
+  const [activeDocumentUrl, setActiveDocumentUrl] = useState<string | null>(null);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentLoading, setDocumentLoading] = useState(false);
+  const [documentError, setDocumentError] = useState("");
 
   // Tabs navigation
   const [activeTab, setActiveTab] = useState<"details" | "model3d" | "budgeting">("details");
@@ -362,6 +382,7 @@ export default function Projects() {
         ["SUSPICIOUS_DIMENSION", "DIMENSION_SEMANTIC_CONFLICT"].includes(issue.code),
       ));
   const hasStoredSourceDocuments = Boolean(selectedProj?.digitalTwin?.sourceDocuments?.length);
+  const hasSourceReference = hasStoredSourceDocuments || Boolean(selectedProj?.originalFileUrl);
   const engineering = budget?.engineering || selectedProj?.digitalTwin?.engineering || null;
   
   const environments = useMemo(() => {
@@ -446,6 +467,38 @@ export default function Projects() {
       setSelected3DItem(null);
     }
   }, [selectedProj]);
+
+  useEffect(() => {
+    setDocumentViewerOpen(false);
+    setProjectDocuments([]);
+    setActiveDocument(null);
+    setActiveDocumentUrl(null);
+    setDocumentError("");
+  }, [selectedProj?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (activeDocumentUrl) URL.revokeObjectURL(activeDocumentUrl);
+    };
+  }, [activeDocumentUrl]);
+
+  useEffect(() => {
+    if (!documentViewerOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setDocumentViewerOpen(false);
+        setActiveDocumentUrl(null);
+        setDocumentError("");
+      }
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [documentViewerOpen]);
 
   const createProject = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -581,6 +634,78 @@ export default function Projects() {
       setReviewingPdf(false);
       setParseStage("");
     }
+  };
+
+  const loadProjectDocument = async (document: ProjectDocument) => {
+    if (!selectedProj?.id) return;
+    setActiveDocument(document);
+    setDocumentError("");
+    if (!document.available) {
+      setActiveDocumentUrl(null);
+      setDocumentError("O arquivo original nao esta mais disponivel no servidor.");
+      return;
+    }
+    if (!document.viewable) {
+      setActiveDocumentUrl(null);
+      setDocumentError("Este tipo de arquivo nao pode ser visualizado no navegador.");
+      return;
+    }
+
+    setDocumentLoading(true);
+    try {
+      const response = await fetch(
+        `${getApiUrl()}/api/projects/${selectedProj.id}/documents/${document.id}`,
+        { headers: { Authorization: "Bearer mock-jwt-token-2026" } },
+      );
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.message || "Nao foi possivel abrir o arquivo.");
+      }
+      const blob = await response.blob();
+      setActiveDocumentUrl(URL.createObjectURL(blob));
+    } catch (error: any) {
+      setActiveDocumentUrl(null);
+      setDocumentError(error?.message || "Nao foi possivel abrir o arquivo.");
+    } finally {
+      setDocumentLoading(false);
+    }
+  };
+
+  const openDocumentViewer = async () => {
+    if (!selectedProj?.id) return;
+    setDocumentViewerOpen(true);
+    setDocumentsLoading(true);
+    setProjectDocuments([]);
+    setActiveDocument(null);
+    setActiveDocumentUrl(null);
+    setDocumentError("");
+    try {
+      const response = await fetch(`${getApiUrl()}/api/projects/${selectedProj.id}/documents`, {
+        headers: { Authorization: "Bearer mock-jwt-token-2026" },
+      });
+      const data = await response.json().catch(() => []);
+      if (!response.ok) {
+        throw new Error(data?.message || "Nao foi possivel listar os arquivos.");
+      }
+      const documents = Array.isArray(data) ? data as ProjectDocument[] : [];
+      setProjectDocuments(documents);
+      const firstViewable = documents.find((document) => document.available && document.viewable);
+      if (firstViewable) {
+        await loadProjectDocument(firstViewable);
+      } else if (documents.length === 0) {
+        setDocumentError("Os arquivos deste envio antigo nao foram preservados. Reenvie-os uma vez para habilitar a visualizacao.");
+      }
+    } catch (error: any) {
+      setDocumentError(error?.message || "Nao foi possivel listar os arquivos.");
+    } finally {
+      setDocumentsLoading(false);
+    }
+  };
+
+  const closeDocumentViewer = () => {
+    setDocumentViewerOpen(false);
+    setActiveDocumentUrl(null);
+    setDocumentError("");
   };
 
   const calculateBudget = async () => {
@@ -1999,6 +2124,21 @@ export default function Projects() {
                 </div>
 
                 <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                  {hasSourceReference && (
+                    <button
+                      type="button"
+                      onClick={openDocumentViewer}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#e8d4b8]/20 bg-[#211811] px-4 py-3 text-sm font-bold text-[#ead5ba] transition hover:border-[#d6ad79]/50 hover:bg-[#d6ad79]/10"
+                    >
+                      <Eye className="h-4 w-4" />
+                      Visualizar arquivos
+                      {hasStoredSourceDocuments ? (
+                        <span className="rounded-full bg-[#d6ad79]/15 px-1.5 py-0.5 text-[10px] text-[#d6ad79]">
+                          {selectedProj.digitalTwin.sourceDocuments.length}
+                        </span>
+                      ) : null}
+                    </button>
+                  )}
                   <label
                     className={`inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#d6ad79]/30 bg-[#d6ad79]/10 px-4 py-3 text-sm font-bold text-[#ead5ba] transition hover:bg-[#d6ad79]/16 ${
                       uploading ? "pointer-events-none opacity-60" : ""
@@ -2812,6 +2952,114 @@ export default function Projects() {
           )}
         </main>
       </section>
+
+      {documentViewerOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-[#090604]/85 p-3 backdrop-blur-sm md:p-6"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeDocumentViewer();
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="Arquivos enviados para leitura"
+            className="flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-[#e8d4b8]/20 bg-[#18120d] shadow-2xl"
+          >
+            <header className="flex items-start justify-between gap-4 border-b border-[#e8d4b8]/12 px-4 py-4 md:px-6">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[#d6ad79]">
+                  <Eye className="h-4 w-4" /> Arquivos enviados para leitura
+                </div>
+                <h2 className="mt-1 truncate text-lg font-semibold text-[#fff8f0]">
+                  {activeDocument?.filename || selectedProj?.name || "Documentos do projeto"}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={closeDocumentViewer}
+                aria-label="Fechar visualizador"
+                className="rounded-lg border border-[#e8d4b8]/15 p-2 text-[#cdbca7] transition hover:bg-white/5 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </header>
+
+            <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[290px_minmax(0,1fr)]">
+              <aside className="max-h-56 overflow-y-auto border-b border-[#e8d4b8]/12 bg-[#211811]/65 p-3 lg:max-h-none lg:border-b-0 lg:border-r">
+                {documentsLoading ? (
+                  <div className="flex items-center gap-2 px-3 py-4 text-sm text-[#bba890]">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Carregando arquivos...
+                  </div>
+                ) : projectDocuments.length ? (
+                  <div className="space-y-2">
+                    {projectDocuments.map((document, index) => {
+                      const active = activeDocument?.id === document.id;
+                      const isPdf = document.mimeType === "application/pdf";
+                      return (
+                        <button
+                          key={document.id}
+                          type="button"
+                          onClick={() => loadProjectDocument(document)}
+                          className={`flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition ${
+                            active
+                              ? "border-[#d6ad79]/50 bg-[#d6ad79]/12"
+                              : "border-[#e8d4b8]/10 bg-[#18120d]/60 hover:border-[#d6ad79]/30"
+                          }`}
+                        >
+                          <span className="mt-0.5 rounded-lg bg-[#d6ad79]/12 p-2 text-[#d6ad79]">
+                            {isPdf ? <FileText className="h-4 w-4" /> : <ImageIcon className="h-4 w-4" />}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block break-words text-xs font-semibold leading-5 text-[#fff8f0]">
+                              {index + 1}. {document.filename}
+                            </span>
+                            <span className="mt-1 block text-[10px] text-[#a99680]">
+                              {isPdf ? `${document.pages || "-"} pagina(s)` : "Imagem"}
+                              {document.sizeBytes ? ` · ${(document.sizeBytes / 1024 / 1024).toFixed(1)} MB` : ""}
+                              {!document.available ? " · indisponivel" : !document.viewable ? " · formato nao suportado" : ""}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="px-3 py-4 text-sm leading-6 text-[#bba890]">Nenhum arquivo preservado neste projeto.</p>
+                )}
+              </aside>
+
+              <main className="relative flex min-h-[420px] items-center justify-center overflow-hidden bg-[#0d0906] lg:min-h-[70vh]">
+                {documentLoading ? (
+                  <div className="flex flex-col items-center gap-3 text-sm text-[#bba890]">
+                    <Loader2 className="h-7 w-7 animate-spin text-[#d6ad79]" />
+                    Abrindo documento...
+                  </div>
+                ) : documentError ? (
+                  <div className="max-w-lg px-8 text-center">
+                    <FileText className="mx-auto h-9 w-9 text-[#d6ad79]" />
+                    <p className="mt-4 text-sm leading-6 text-[#cdbca7]">{documentError}</p>
+                  </div>
+                ) : activeDocumentUrl && activeDocument?.mimeType === "application/pdf" ? (
+                  <iframe
+                    src={activeDocumentUrl}
+                    title={activeDocument.filename}
+                    className="h-[70vh] w-full bg-white"
+                  />
+                ) : activeDocumentUrl && activeDocument?.mimeType.startsWith("image/") ? (
+                  <img
+                    src={activeDocumentUrl}
+                    alt={activeDocument.filename}
+                    className="max-h-[72vh] max-w-full object-contain"
+                  />
+                ) : !documentsLoading ? (
+                  <p className="px-6 text-center text-sm text-[#a99680]">Selecione um arquivo para visualizar.</p>
+                ) : null}
+              </main>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

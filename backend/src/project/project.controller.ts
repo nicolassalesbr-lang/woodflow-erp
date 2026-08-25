@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Patch, Body, Param, Headers, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Headers, HttpException, HttpStatus, Res, StreamableFile } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { JwtService } from '@nestjs/jwt';
+import type { Response } from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -89,6 +90,82 @@ export class ProjectController {
         status: 'DRAFT',
       },
     });
+  }
+
+  @Get(':id/documents')
+  async getProjectDocuments(
+    @Headers('authorization') authHeader: string,
+    @Param('id') id: string,
+  ) {
+    const tenantId = this.verifyTokenAndGetTenantId(authHeader);
+    const project = await this.prisma.project.findFirst({ where: { id, tenantId } });
+    if (!project) throw new HttpException('Project not found', HttpStatus.NOT_FOUND);
+
+    const twin = project.digitalTwin && typeof project.digitalTwin === 'object' ? project.digitalTwin as any : {};
+    const documents = Array.isArray(twin.sourceDocuments) ? twin.sourceDocuments as StoredProjectDocument[] : [];
+    const directory = path.resolve(this.projectUploadDirectory(id));
+
+    return documents.map((document, index) => {
+      const safeKey = path.basename(String(document.storageKey || ''));
+      const filePath = safeKey ? path.resolve(directory, safeKey) : '';
+      const available = Boolean(
+        safeKey
+        && safeKey === document.storageKey
+        && filePath.startsWith(`${directory}${path.sep}`)
+        && fs.existsSync(filePath),
+      );
+      const mimeType = this.viewableDocumentMimeType(document);
+      return {
+        id: String(index),
+        filename: document.filename || `documento-${index + 1}`,
+        mimeType: mimeType || document.mimeType || 'application/octet-stream',
+        pages: Number(document.pages) || null,
+        available,
+        viewable: Boolean(mimeType),
+        sizeBytes: available ? fs.statSync(filePath).size : null,
+      };
+    });
+  }
+
+  @Get(':id/documents/:documentIndex')
+  async viewProjectDocument(
+    @Headers('authorization') authHeader: string,
+    @Param('id') id: string,
+    @Param('documentIndex') rawDocumentIndex: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const tenantId = this.verifyTokenAndGetTenantId(authHeader);
+    const project = await this.prisma.project.findFirst({ where: { id, tenantId } });
+    if (!project) throw new HttpException('Project not found', HttpStatus.NOT_FOUND);
+
+    const twin = project.digitalTwin && typeof project.digitalTwin === 'object' ? project.digitalTwin as any : {};
+    const documents = Array.isArray(twin.sourceDocuments) ? twin.sourceDocuments as StoredProjectDocument[] : [];
+    const documentIndex = Number(rawDocumentIndex);
+    if (!Number.isInteger(documentIndex) || documentIndex < 0 || documentIndex >= documents.length) {
+      throw new HttpException('Documento nao encontrado.', HttpStatus.NOT_FOUND);
+    }
+
+    const document = documents[documentIndex];
+    const safeKey = path.basename(String(document.storageKey || ''));
+    const directory = path.resolve(this.projectUploadDirectory(id));
+    const filePath = safeKey ? path.resolve(directory, safeKey) : '';
+    if (!safeKey || safeKey !== document.storageKey || !filePath.startsWith(`${directory}${path.sep}`) || !fs.existsSync(filePath)) {
+      throw new HttpException('O arquivo original nao esta mais disponivel.', HttpStatus.NOT_FOUND);
+    }
+
+    const mimeType = this.viewableDocumentMimeType(document);
+    if (!mimeType) {
+      throw new HttpException('Este tipo de arquivo nao pode ser visualizado no navegador.', HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    const filename = String(document.filename || `documento-${documentIndex + 1}`).replace(/[\r\n]/g, ' ');
+    const size = fs.statSync(filePath).size;
+    response.setHeader('Content-Type', mimeType);
+    response.setHeader('Content-Length', String(size));
+    response.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    response.setHeader('Cache-Control', 'private, max-age=300');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    return new StreamableFile(fs.createReadStream(filePath));
   }
 
   /**
@@ -595,6 +672,30 @@ Nota: Se a dimensão não está cotada, use null:
     const root = process.env.PROJECT_UPLOAD_DIR || path.join(process.cwd(), 'uploads', 'projects');
     const safeProjectId = String(projectId).replace(/[^a-zA-Z0-9_-]/g, '');
     return path.join(root, safeProjectId);
+  }
+
+  private viewableDocumentMimeType(document: StoredProjectDocument): string | null {
+    const declared = String(document.mimeType || '').toLowerCase().split(';')[0].trim();
+    const extension = path.extname(String(document.filename || document.storageKey || '')).toLowerCase();
+    const allowed = new Set([
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+      'image/bmp',
+    ]);
+    if (allowed.has(declared)) return declared;
+    const byExtension: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.webp': 'image/webp',
+      '.gif': 'image/gif',
+      '.bmp': 'image/bmp',
+    };
+    return byExtension[extension] || null;
   }
 
   /** Keeps the original drawing available for a later targeted review. */
