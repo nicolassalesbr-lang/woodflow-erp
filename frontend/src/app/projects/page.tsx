@@ -16,7 +16,11 @@ import {
   DollarSign,
   Package,
   Settings,
-  Percent
+  Percent,
+  Pencil,
+  Save,
+  X,
+  Loader2
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { getApiUrl } from '../../utils/api';
@@ -384,6 +388,28 @@ export default function Projects() {
       setProjects([]);
       setSelectedProj(null);
     }
+  };
+
+  const saveProjectItem = async (item: any, changes: any) => {
+    if (!selectedProj?.id) throw new Error('Nenhum projeto selecionado.');
+    const itemRef = String(item.id || '').replace(/^pending-/, '');
+    const response = await fetch(
+      `${getApiUrl()}/api/projects/${selectedProj.id}/items/${encodeURIComponent(itemRef)}/measurements`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer mock-jwt-token-2026',
+        },
+        body: JSON.stringify(changes),
+      },
+    );
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.message || 'Nao foi possivel salvar as medidas.');
+    }
+    await fetchProjects();
+    return data;
   };
 
   const fetchBudget = async (projectId: string) => {
@@ -2180,7 +2206,7 @@ export default function Projects() {
                                 </div>
                                 <div className="space-y-2.5">
                                   {envItems.map((item: any) => (
-                                    <ItemDetailCard key={item.id} item={item} />
+                                    <ItemDetailCard key={item.id} item={item} onSave={saveProjectItem} />
                                   ))}
                                 </div>
                               </div>
@@ -2861,15 +2887,67 @@ function MiniStat({ label, value }: { label: string; value: any }) {
   );
 }
 
-function ItemDetailCard({ item }: { item: any }) {
+function ItemDetailCard({ item, onSave }: { item: any; onSave: (item: any, changes: any) => Promise<any> }) {
   const [expanded, setExpanded] = useState(false);
-  const hasMeasures = item.width > 0 || item.height > 0 || item.depth > 0;
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const itemDraft = (source: any) => ({
+    width: Number(source.width) || 0,
+    height: Number(source.height) || 0,
+    depth: Number(source.depth) || 0,
+    thickness: Number(source.thickness) || 18,
+    quantity: Number(source.quantity) || 1,
+    materialType: source.materialType || 'MDF 18mm',
+    cor: source.cor || '',
+    acabamento: source.acabamento || '',
+    observacoes: source.observacoes || '',
+  });
+  const [draft, setDraft] = useState<any>(() => itemDraft(item));
   const dimension = (value: number) => value > 0 ? value : 'pendente';
+
+  useEffect(() => {
+    if (!editing) setDraft(itemDraft(item));
+  }, [item, editing]);
+
+  const startEditing = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    setDraft(itemDraft(item));
+    setSaveError('');
+    setExpanded(true);
+    setEditing(true);
+  };
+
+  const cancelEditing = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    setDraft(itemDraft(item));
+    setSaveError('');
+    setEditing(false);
+  };
+
+  const submitEdit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if ([draft.width, draft.height, draft.depth].some((value) => Number(value) <= 0)) {
+      setSaveError('Preencha largura, altura e profundidade com valores maiores que zero.');
+      return;
+    }
+    setSaving(true);
+    setSaveError('');
+    try {
+      await onSave(item, draft);
+      setEditing(false);
+    } catch (error: any) {
+      setSaveError(error?.message || 'Nao foi possivel salvar as medidas.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div 
-      onClick={() => setExpanded(!expanded)}
-      className="min-w-0 rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] p-3.5 transition hover:border-[#d6ad79]/40 cursor-pointer select-none group space-y-3"
+      onClick={() => !editing && setExpanded(!expanded)}
+      className="group min-w-0 cursor-pointer space-y-3 rounded-xl border border-[#e8d4b8]/12 bg-[#fff7ed]/[0.04] p-3.5 transition hover:border-[#d6ad79]/40"
     >
       {/* Compact Collapsed Header (Always Visible) */}
       <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -2894,9 +2972,16 @@ function ItemDetailCard({ item }: { item: any }) {
           ) : null}
         </div>
 
-        {/* Compact Dimensions L (mm) | A (mm) | P (mm) */}
-        {hasMeasures && (
-          <div className="flex w-full shrink-0 items-center gap-3 sm:w-auto">
+        <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
+          <button
+            type="button"
+            onClick={startEditing}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[#d6ad79]/30 bg-[#d6ad79]/10 px-2.5 py-1.5 text-[11px] font-bold text-[#ead5ba] transition hover:bg-[#d6ad79]/20"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Editar
+          </button>
+          {/* Compact Dimensions L (mm) | A (mm) | P (mm) */}
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-[#e8d4b8]/10 bg-[#211811]/80 px-3 py-1.5 text-xs font-mono text-[#e8d9c6] sm:flex-none">
               <span><span className="text-[#a99680] text-[10px]">L:</span> <strong className="text-white">{dimension(item.width)}</strong></span>
               <span><span className="text-[#a99680] text-[10px]">A:</span> <strong className="text-white">{dimension(item.height)}</strong></span>
@@ -2906,12 +2991,114 @@ function ItemDetailCard({ item }: { item: any }) {
             <span className="text-xs text-[#a99680] font-bold">
               {expanded ? '▲' : '▼'}
             </span>
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Expanded Details (Visible only when clicked) */}
-      {expanded && (
+      {expanded && editing && (
+        <form onSubmit={submitEdit} onClick={(event) => event.stopPropagation()} className="space-y-4 border-t border-[#e8d4b8]/10 pt-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#d6ad79]">Medidas externas do movel</p>
+            <p className="mt-1 text-[11px] leading-5 text-[#a99680]">Informe L, A e P em milimetros. Nao use pe-direito, tamanho do ambiente ou vao de eletrodomestico.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {[
+              ['width', 'Largura - L (mm)', 12000],
+              ['height', 'Altura - A (mm)', 4000],
+              ['depth', 'Profundidade - P (mm)', 1800],
+              ['thickness', 'Espessura (mm)', 100],
+            ].map(([field, label, max]) => (
+              <label key={String(field)} className="text-[10px] font-semibold text-[#bba890]">
+                {String(label)}
+                <input
+                  type="number"
+                  min={1}
+                  max={Number(max)}
+                  step={1}
+                  required
+                  value={draft[String(field)] || ''}
+                  onChange={(event) => setDraft((current: any) => ({ ...current, [String(field)]: Number(event.target.value) || 0 }))}
+                  className="mt-1 w-full rounded-lg border border-[#e8d4b8]/15 bg-[#18120d] px-3 py-2 text-sm text-[#fff8f0] outline-none focus:border-[#d6ad79]/60"
+                />
+              </label>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <label className="text-[10px] font-semibold text-[#bba890] md:col-span-2">
+              Material
+              <input
+                type="text"
+                value={draft.materialType}
+                onChange={(event) => setDraft((current: any) => ({ ...current, materialType: event.target.value }))}
+                className="mt-1 w-full rounded-lg border border-[#e8d4b8]/15 bg-[#18120d] px-3 py-2 text-sm text-[#fff8f0] outline-none focus:border-[#d6ad79]/60"
+              />
+            </label>
+            <label className="text-[10px] font-semibold text-[#bba890]">
+              Cor
+              <input
+                type="text"
+                value={draft.cor}
+                onChange={(event) => setDraft((current: any) => ({ ...current, cor: event.target.value }))}
+                className="mt-1 w-full rounded-lg border border-[#e8d4b8]/15 bg-[#18120d] px-3 py-2 text-sm text-[#fff8f0] outline-none focus:border-[#d6ad79]/60"
+              />
+            </label>
+            <label className="text-[10px] font-semibold text-[#bba890]">
+              Quantidade
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={draft.quantity}
+                onChange={(event) => setDraft((current: any) => ({ ...current, quantity: Number(event.target.value) || 1 }))}
+                className="mt-1 w-full rounded-lg border border-[#e8d4b8]/15 bg-[#18120d] px-3 py-2 text-sm text-[#fff8f0] outline-none focus:border-[#d6ad79]/60"
+              />
+            </label>
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <label className="text-[10px] font-semibold text-[#bba890]">
+              Acabamento
+              <input
+                type="text"
+                value={draft.acabamento}
+                onChange={(event) => setDraft((current: any) => ({ ...current, acabamento: event.target.value }))}
+                className="mt-1 w-full rounded-lg border border-[#e8d4b8]/15 bg-[#18120d] px-3 py-2 text-sm text-[#fff8f0] outline-none focus:border-[#d6ad79]/60"
+              />
+            </label>
+            <label className="text-[10px] font-semibold text-[#bba890] md:col-span-2">
+              Observacoes e origem da medida
+              <textarea
+                rows={2}
+                value={draft.observacoes}
+                onChange={(event) => setDraft((current: any) => ({ ...current, observacoes: event.target.value }))}
+                className="mt-1 w-full resize-y rounded-lg border border-[#e8d4b8]/15 bg-[#18120d] px-3 py-2 text-sm text-[#fff8f0] outline-none focus:border-[#d6ad79]/60"
+              />
+            </label>
+          </div>
+          {saveError ? (
+            <p className="rounded-lg border border-red-400/25 bg-red-400/10 px-3 py-2 text-xs text-red-200">{saveError}</p>
+          ) : null}
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={cancelEditing}
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#e8d4b8]/15 px-3 py-2 text-xs font-bold text-[#cdbca7] hover:bg-white/5 disabled:opacity-50"
+            >
+              <X className="h-3.5 w-3.5" /> Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#ead5ba] px-3 py-2 text-xs font-black text-[#20170f] hover:bg-[#fff0d8] disabled:cursor-wait disabled:opacity-60"
+            >
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              {saving ? 'Salvando...' : 'Salvar e recalcular'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {expanded && !editing && (
         <div className="pt-3 border-t border-[#e8d4b8]/10 space-y-2 text-xs text-[#bba890]">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <span className="rounded-md border border-[#e8d4b8]/15 bg-[#211811]/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#c89a63]">

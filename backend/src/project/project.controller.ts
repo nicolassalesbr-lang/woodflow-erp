@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Headers, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Headers, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import * as fs from 'fs';
@@ -89,6 +89,150 @@ export class ProjectController {
         status: 'DRAFT',
       },
     });
+  }
+
+  /**
+   * Manual technical correction from the project card. The interpretation JSON,
+   * quoteable ProjectItems and engineering result are rebuilt together so the
+   * screen, budget and nesting never disagree after an edit.
+   */
+  @Patch(':id/items/:itemRef/measurements')
+  async updateProjectItemMeasurements(
+    @Headers('authorization') authHeader: string,
+    @Param('id') id: string,
+    @Param('itemRef') rawItemRef: string,
+    @Body() body: any,
+  ) {
+    const tenantId = this.verifyTokenAndGetTenantId(authHeader);
+    const project = await this.prisma.project.findFirst({
+      where: { id, tenantId },
+      include: { items: true },
+    });
+    if (!project) throw new HttpException('Project not found', HttpStatus.NOT_FOUND);
+
+    const twin = project.digitalTwin && typeof project.digitalTwin === 'object' ? project.digitalTwin as any : {};
+    const interpretation = twin.interpretation;
+    if (!interpretation?.environments) {
+      throw new HttpException('O projeto ainda nao possui itens interpretados para editar.', HttpStatus.UNPROCESSABLE_ENTITY);
+    }
+
+    const itemRef = decodeURIComponent(String(rawItemRef || '')).replace(/^pending-/, '');
+    const interpretedItems = interpretation.environments.flatMap((environment: any) => environment.items || []);
+    const databaseItem = project.items.find((item: any) => item.id === itemRef);
+    let targetIndex = interpretedItems.findIndex((item: any) => item.id === itemRef);
+
+    if (targetIndex < 0 && databaseItem) {
+      targetIndex = interpretedItems.findIndex((item: any) => {
+        const dimensions = item.dimensions || {};
+        return this.normKey(item.environment) === this.normKey(databaseItem.environment)
+          && this.normKey(item.description) === this.normKey(databaseItem.description)
+          && Number(dimensions.width || 0) === Number(databaseItem.width || 0)
+          && Number(dimensions.height || 0) === Number(databaseItem.height || 0)
+          && Number(dimensions.depth || 0) === Number(databaseItem.depth || 0);
+      });
+      if (targetIndex < 0) {
+        targetIndex = interpretedItems.findIndex((item: any) => this.isSameFurniture(item, databaseItem));
+      }
+    }
+
+    if (targetIndex < 0 && !databaseItem) {
+      throw new HttpException('Movel nao encontrado neste projeto.', HttpStatus.NOT_FOUND);
+    }
+
+    const current = targetIndex >= 0
+      ? this.sourceItemFromInterpretation(interpretedItems[targetIndex])
+      : { ...databaseItem, source: 'manual', sourcePage: null, sourceText: null };
+    const positiveNumber = (field: string, fallback: any, maximum: number): number => {
+      const value = Number(body?.[field] ?? fallback);
+      if (!Number.isFinite(value) || value <= 0 || value > maximum) {
+        throw new HttpException(`${field} deve ser maior que zero e no maximo ${maximum} mm.`, HttpStatus.BAD_REQUEST);
+      }
+      return Math.round(value);
+    };
+
+    const edited = {
+      ...current,
+      width: positiveNumber('width', current.width, 12000),
+      height: positiveNumber('height', current.height, 4000),
+      depth: positiveNumber('depth', current.depth, 1800),
+      thickness: positiveNumber('thickness', current.thickness || 18, 100),
+      quantity: Math.max(1, Math.min(100, Math.round(Number(body?.quantity ?? current.quantity ?? 1) || 1))),
+      materialType: String(body?.materialType ?? current.materialType ?? 'MDF 18mm').trim() || 'MDF 18mm',
+      cor: body?.cor === undefined ? current.cor : String(body.cor || '').trim() || null,
+      acabamento: body?.acabamento === undefined ? current.acabamento : String(body.acabamento || '').trim() || null,
+      observacoes: String(body?.observacoes ?? current.observacoes ?? '').trim(),
+      source: 'manual',
+      reviewTargetId: targetIndex >= 0 ? interpretedItems[targetIndex].id : `manual-${databaseItem.id}`,
+    };
+    edited.observacoes = `${edited.observacoes}${edited.observacoes ? ' | ' : ''}Medidas confirmadas manualmente em ${new Date().toISOString()}.`.slice(0, 500);
+
+    const conflict = dimensionSemanticConflict(edited);
+    if (conflict) {
+      throw new HttpException(`As medidas nao foram salvas: ${conflict}`, HttpStatus.UNPROCESSABLE_ENTITY);
+    }
+
+    const rawItems = interpretedItems.map((item: any, index: number) =>
+      index === targetIndex ? edited : this.sourceItemFromInterpretation(item),
+    );
+    if (targetIndex < 0) rawItems.push(edited);
+
+    const consolidated = this.dedupeItems(this.sanitizeItems(rawItems));
+    const sourceFiles = Array.isArray(interpretation.sourceFiles) ? interpretation.sourceFiles as ProjectSourceFile[] : [];
+    const nextInterpretation: any = buildProjectInterpretation(consolidated, sourceFiles);
+    if (interpretation.review) nextInterpretation.review = interpretation.review;
+    nextInterpretation.manualReview = {
+      editedAt: new Date().toISOString(),
+      editedItem: edited.description,
+      source: 'project_card',
+    };
+
+    const quoteReadyItems = consolidated.filter((item) =>
+      item.width > 0 && item.height > 0 && item.depth > 0 && !dimensionSemanticConflict(item),
+    );
+    const engineering = quoteReadyItems.length ? buildEngineeringResult(quoteReadyItems, { projectId: id }) : null;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.projectItem.deleteMany({ where: { projectId: id } });
+      for (const item of quoteReadyItems) {
+        await tx.projectItem.create({
+          data: {
+            projectId: id,
+            environment: item.environment,
+            itemType: item.itemType,
+            description: item.description,
+            codigo: item.codigo,
+            width: item.width,
+            height: item.height,
+            depth: item.depth,
+            thickness: item.thickness,
+            quantity: item.quantity,
+            materialType: item.materialType,
+            cor: item.cor,
+            acabamento: item.acabamento,
+            observacoes: item.observacoes,
+            area: item.area,
+            volume: item.volume,
+          },
+        });
+      }
+      await tx.project.update({
+        where: { id },
+        data: {
+          parseStatus: 'COMPLETED',
+          parseProgress: 100,
+          parseError: null,
+          digitalTwin: { ...twin, interpretation: nextInterpretation, engineering },
+        },
+      });
+    });
+
+    return {
+      success: true,
+      editedItem: edited.description,
+      measurements: { width: edited.width, height: edited.height, depth: edited.depth },
+      completeMeasurements: nextInterpretation.summary.completeMeasurements,
+      pendingMeasurements: nextInterpretation.summary.pendingMeasurements,
+    };
   }
 
   // ─────────────────────────────────────────────────────────────────────────
